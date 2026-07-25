@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/poll-prices",
+      "schedule": "*/2 9-15 * * 1-5"
+    }
+  ]
+}
