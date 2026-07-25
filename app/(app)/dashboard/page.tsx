@@ -4,8 +4,10 @@ import Link from 'next/link';
 
 export const dynamic = 'force-dynamic';
 
+const IST = 'Asia/Kolkata';
+
 function greeting() {
-  const h = new Date().getHours();
+  const h = Number(new Date().toLocaleString('en-US', { hour: '2-digit', hour12: false, timeZone: IST })) % 24;
   return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
 }
 
@@ -73,7 +75,7 @@ export default async function DashboardPage() {
       <div className="page-head">
         <div>
           <div className="eyebrow">
-            {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+            {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: IST })}
           </div>
           <h1>{greeting()}.</h1>
           <p>

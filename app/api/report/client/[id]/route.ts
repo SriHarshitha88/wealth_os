@@ -41,7 +41,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const pl = current - invested;
   const totals = { invested, current, pl, plPct: invested ? (pl / invested) * 100 : 0 };
 
-  const generatedAt = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
+  const generatedAt = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kolkata' });
 
   const buffer = await renderToBuffer(
     createElement(ClientReportPdf, { client, rows, totals, generatedAt }) as any,
