@@ -10,17 +10,12 @@ export default async function LoginPage({
   return (
     <div className="auth-wrap">
       <div className="auth-card">
-        <div className="brand-mark" style={{ padding: '0 0 18px' }}>
-          <div className="brand-glyph">
-            <svg viewBox="0 0 24 24" fill="none" width="19" height="19">
-              <path d="M3 17l5-6 4 4 5-8 4 5" stroke="#fff" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </div>
-          <div className="brand-name" style={{ color: 'var(--ink)' }}>Wealth&nbsp;OS</div>
+        <div className="auth-hero">
+          <img src="/ashesha-wordmark.png" alt="Ashesha Capital Advisory LLP" />
         </div>
 
         <h1>Welcome back</h1>
-        <p className="sub">Sign in to your workspace.</p>
+        <p className="sub">Sign in to your Wealth&nbsp;OS workspace.</p>
 
         <form action={signIn}>
           <div className="field">

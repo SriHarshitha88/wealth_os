@@ -1,8 +1,21 @@
 import { type NextRequest } from 'next/server';
 import { renderToBuffer } from '@react-pdf/renderer';
 import { createElement } from 'react';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { createClient } from '@/lib/supabase/server';
 import ClientReportPdf, { type ReportRow } from '@/components/ClientReportPdf';
+
+// Load the Ashesha lockup once and cache it as a data URI for the PDF header.
+let logoPromise: Promise<string | null> | null = null;
+function getLogo(): Promise<string | null> {
+  if (!logoPromise) {
+    logoPromise = readFile(path.join(process.cwd(), 'public', 'ashesha-pdf.png'))
+      .then((b) => `data:image/png;base64,${b.toString('base64')}`)
+      .catch(() => null);
+  }
+  return logoPromise;
+}
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -42,9 +55,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const totals = { invested, current, pl, plPct: invested ? (pl / invested) * 100 : 0 };
 
   const generatedAt = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kolkata' });
+  const logo = await getLogo();
 
   const buffer = await renderToBuffer(
-    createElement(ClientReportPdf, { client, rows, totals, generatedAt }) as any,
+    createElement(ClientReportPdf, { client, rows, totals, generatedAt, logo }) as any,
   );
 
   const safe = client.name.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '') || 'client';

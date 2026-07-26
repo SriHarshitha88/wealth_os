@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { cr, inr, pct } from '@/lib/format';
 import Link from 'next/link';
+import PriceTicker from '@/components/PriceTicker';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,7 +20,7 @@ export default async function DashboardPage() {
   const supabase = await createClient();
 
   const [{ data: holdings }, { count: clientCount }, { data: fees }, { data: txns }] = await Promise.all([
-    supabase.from('holdings').select('quantity, avg_price, securities(symbol, name, last_price)'),
+    supabase.from('holdings').select('quantity, avg_price, securities(symbol, name, last_price, prev_close)'),
     supabase.from('clients').select('id', { count: 'exact', head: true }),
     supabase.from('fees').select('amount, status').in('status', ['Pending', 'Overdue']),
     supabase
@@ -47,6 +48,19 @@ export default async function DashboardPage() {
       bySec.set(sec.symbol, e);
     }
   }
+
+  // Live ticker tape — one entry per distinct held stock with a price + day change.
+  const tickMap = new Map<string, { symbol: string; price: number; changePct: number | null }>();
+  for (const h of holdings ?? []) {
+    const sec = rel((h as any).securities);
+    if (sec?.symbol && sec.last_price != null && !tickMap.has(sec.symbol)) {
+      const price = Number(sec.last_price);
+      const prev = sec.prev_close != null ? Number(sec.prev_close) : null;
+      const changePct = prev ? ((price - prev) / prev) * 100 : null;
+      tickMap.set(sec.symbol, { symbol: sec.symbol, price, changePct });
+    }
+  }
+  const ticks = [...tickMap.values()].sort((a, b) => a.symbol.localeCompare(b.symbol));
 
   const pl = current - invested;
   const plPct = invested ? (pl / invested) * 100 : 0;
@@ -85,6 +99,8 @@ export default async function DashboardPage() {
           </p>
         </div>
       </div>
+
+      {ticks.length > 0 && <PriceTicker items={ticks} />}
 
       <div className="kpis">
         <div className="kpi feature">

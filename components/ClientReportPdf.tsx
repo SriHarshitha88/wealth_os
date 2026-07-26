@@ -1,4 +1,4 @@
-import { Document, Page, View, Text, StyleSheet } from '@react-pdf/renderer';
+import { Document, Page, View, Text, Image, StyleSheet } from '@react-pdf/renderer';
 
 // Amounts use plain Indian-grouped numbers under "Rs." column headers
 // (PDF core fonts have no ₹ glyph — this matches how AMC statements print anyway).
@@ -8,8 +8,9 @@ const gl = (n: number) => (n < 0 ? `(${num(n)})` : num(n)); // accounting-style 
 const qtyf = (n: number) => (n || 0).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 const pctf = (n: number) => (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
 
-const BRAND = '#0E5B54';
-const HEAD = '#0C4B45';
+const BRAND = '#12294A';   // Ashesha navy
+const HEAD = '#12294A';    // table header band
+const GOLD = '#B0863A';    // Ashesha gold accent
 const GAIN = '#137A52';
 const LOSS = '#C4472F';
 const INK = '#16211E';
@@ -22,8 +23,9 @@ const s = StyleSheet.create({
   page: { paddingTop: 34, paddingBottom: 60, paddingHorizontal: 34, fontSize: 8.5, color: INK, fontFamily: 'Helvetica' },
 
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 },
+  logo: { width: 156, height: 80, objectFit: 'contain' },
   brand: { fontSize: 17, fontFamily: 'Helvetica-Bold', color: BRAND },
-  brandSub: { fontSize: 7, color: MUTE, marginTop: 2, letterSpacing: 1.2 },
+  brandSub: { fontSize: 7, color: GOLD, marginTop: 2, letterSpacing: 1.6, fontFamily: 'Helvetica-Bold' },
   stmt: { fontSize: 11, fontFamily: 'Helvetica-Bold', textAlign: 'right' },
   asof: { fontSize: 8, color: MUTE, marginTop: 2, textAlign: 'right' },
   rule: { borderBottomWidth: 1.5, borderBottomColor: BRAND, marginTop: 8, marginBottom: 14 },
@@ -45,10 +47,11 @@ const s = StyleSheet.create({
   rowAlt: { backgroundColor: ZEBRA },
   totalRow: { flexDirection: 'row', backgroundColor: BAND, paddingVertical: 7, paddingHorizontal: 4, borderTopWidth: 1, borderTopColor: BRAND },
 
-  cSec: { width: '31%' },
-  cCat: { width: '19%' },
-  cQty: { width: '10%', textAlign: 'right' },
-  cVal: { width: '13.33%', textAlign: 'right' },
+  cSec: { width: '28%' },
+  cCat: { width: '15%' },
+  cQty: { width: '9%', textAlign: 'right' },
+  cVal: { width: '12.5%', textAlign: 'right' },
+  cPct: { width: '10.5%', textAlign: 'right' },
 
   secName: { fontSize: 8.5, fontFamily: 'Helvetica-Bold' },
   secSym: { fontSize: 7, color: MUTE, marginTop: 1 },
@@ -69,9 +72,10 @@ export type ReportData = {
   rows: ReportRow[];
   totals: { invested: number; current: number; pl: number; plPct: number };
   generatedAt: string;
+  logo?: string | null; // data URI of the Ashesha lockup
 };
 
-export default function ClientReportPdf({ client, rows, totals, generatedAt }: ReportData) {
+export default function ClientReportPdf({ client, rows, totals, generatedAt, logo }: ReportData) {
   const glColor = (n: number | null) => (n == null ? INK : n < 0 ? LOSS : GAIN);
 
   return (
@@ -79,8 +83,14 @@ export default function ClientReportPdf({ client, rows, totals, generatedAt }: R
       <Page size="A4" style={s.page}>
         <View style={s.header}>
           <View>
-            <Text style={s.brand}>Wealth OS</Text>
-            <Text style={s.brandSub}>PORTFOLIO MANAGEMENT</Text>
+            {logo ? (
+              <Image src={logo} style={s.logo} />
+            ) : (
+              <>
+                <Text style={s.brand}>Ashesha Capital</Text>
+                <Text style={s.brandSub}>ADVISORY LLP</Text>
+              </>
+            )}
           </View>
           <View>
             <Text style={s.stmt}>Portfolio Statement</Text>
@@ -89,7 +99,6 @@ export default function ClientReportPdf({ client, rows, totals, generatedAt }: R
         </View>
         <View style={s.rule} />
 
-        <Text style={s.prepared}>Prepared for</Text>
         <Text style={s.clientName}>{client.name}</Text>
         <Text style={s.clientMeta}>
           {client.tier} client{client.phone ? `   ·   ${client.phone}` : ''}{client.email ? `   ·   ${client.email}` : ''}
@@ -110,6 +119,7 @@ export default function ClientReportPdf({ client, rows, totals, generatedAt }: R
           <Text style={[s.th, s.cVal]}>Current Value* Rs</Text>
           <Text style={[s.th, s.cVal]}>Value at Cost Rs</Text>
           <Text style={[s.th, s.cVal]}>Unrealised Gain / (Loss) Rs</Text>
+          <Text style={[s.th, s.cPct]}>Gain / (Loss) %</Text>
         </View>
 
         {rows.map((r, i) => (
@@ -123,6 +133,7 @@ export default function ClientReportPdf({ client, rows, totals, generatedAt }: R
             <Text style={[s.cell, s.cVal]}>{r.currentValue != null ? num(r.currentValue) : '-'}</Text>
             <Text style={[s.cell, s.cVal]}>{num(r.investedValue)}</Text>
             <Text style={[s.cell, s.cVal, { color: glColor(r.pl) }]}>{r.pl != null ? gl(r.pl) : '-'}</Text>
+            <Text style={[s.cell, s.cPct, { color: glColor(r.pl) }]}>{r.ret != null ? pctf(r.ret) : '-'}</Text>
           </View>
         ))}
 
@@ -133,12 +144,13 @@ export default function ClientReportPdf({ client, rows, totals, generatedAt }: R
           <Text style={[s.bold, s.cVal, { fontSize: 8.5 }]}>{num(totals.current)}</Text>
           <Text style={[s.bold, s.cVal, { fontSize: 8.5 }]}>{num(totals.invested)}</Text>
           <Text style={[s.bold, s.cVal, { fontSize: 8.5, color: glColor(totals.pl) }]}>{gl(totals.pl)}</Text>
+          <Text style={[s.bold, s.cPct, { fontSize: 8.5, color: glColor(totals.pl) }]}>{pctf(totals.plPct)}</Text>
         </View>
 
         <View style={s.footer} fixed>
           <Text style={s.note}>* Current value is basis the last available stock price and may differ from realisable value.</Text>
           <Text style={s.note}>Value at Cost is the purchase cost of the holding. Figures are indicative and do not constitute investment advice.</Text>
-          <Text style={s.pageNo} render={({ pageNumber, totalPages }) => `Generated by Wealth OS  ·  Page ${pageNumber} of ${totalPages}`} />
+          <Text style={s.pageNo} render={({ pageNumber, totalPages }) => `Ashesha Capital Advisory LLP  ·  Page ${pageNumber} of ${totalPages}`} />
         </View>
       </Page>
     </Document>

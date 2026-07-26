@@ -4,8 +4,12 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { deleteClients } from '@/app/actions/clients';
+import { cr, pct } from '@/lib/format';
 
-type Row = { id: string; name: string; phone: string; tier: string };
+type Row = {
+  id: string; name: string; phone: string; tier: string;
+  invested: number; current: number; pl: number; plPct: number;
+};
 const tierClass = (t: string) => (t === 'Platinum' ? 'plat' : t === 'Gold' ? 'gold' : 'silv');
 
 export default function ClientsTable({ rows }: { rows: Row[] }) {
@@ -48,6 +52,10 @@ export default function ClientsTable({ rows }: { rows: Row[] }) {
                 <th style={{ textAlign: 'left' }}>Client</th>
                 <th style={{ textAlign: 'left' }}>Phone</th>
                 <th style={{ textAlign: 'left' }}>Tier</th>
+                <th>Invested</th>
+                <th>Current value</th>
+                <th>Gain / Loss</th>
+                <th>% G/L</th>
                 <th style={{ textAlign: 'left' }}>Report</th>
               </tr>
             </thead>
@@ -63,6 +71,10 @@ export default function ClientsTable({ rows }: { rows: Row[] }) {
                   </td>
                   <td style={{ textAlign: 'left' }}>{c.phone}</td>
                   <td style={{ textAlign: 'left' }}><span className={'pill ' + tierClass(c.tier)}>{c.tier}</span></td>
+                  <td className="tnum">{cr(c.invested)}</td>
+                  <td className="tnum">{cr(c.current)}</td>
+                  <td className={'tnum ' + (c.pl >= 0 ? 'num-pos' : 'num-neg')}>{cr(c.pl)}</td>
+                  <td className={'tnum ' + (c.pl >= 0 ? 'num-pos' : 'num-neg')}>{pct(c.plPct)}</td>
                   <td style={{ textAlign: 'left' }}>
                     <a className="btn" href={`/api/report/client/${c.id}`} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-flex' }}>
                       <svg viewBox="0 0 24 24" fill="none" width="15" height="15">

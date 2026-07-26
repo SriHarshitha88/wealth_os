@@ -17,11 +17,9 @@ export default function Sidebar({ name }: { name: string }) {
   return (
     <aside className="rail">
       <div className="brand-mark">
-        <div className="brand-glyph">
-          <svg viewBox="0 0 24 24" fill="none" width="19" height="19">
-            <path d="M3 17l5-6 4 4 5-8 4 5" stroke="#fff" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </div>
+        <span className="brand-tile">
+          <img src="/ashesha-as.png" alt="Ashesha Capital" />
+        </span>
         <div className="brand-name">Wealth&nbsp;OS</div>
       </div>
 

@@ -39,6 +39,6 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  // Run on everything except static assets, the login page, and the cron route
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|login|api/cron).*)'],
+  // Run on everything except static assets, image files, the login page, and the cron route
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|login|api/cron|.*\\.(?:png|jpg|jpeg|svg|webp|gif|ico)$).*)'],
 };

@@ -1,16 +1,25 @@
 import { createClient } from '@/lib/supabase/server';
 import ClientsTable from '@/components/ClientsTable';
+import ImportPortfolioModal from '@/components/ImportPortfolioModal';
 
 export const dynamic = 'force-dynamic';
 
 export default async function ClientsPage() {
   const supabase = await createClient();
-  const { data: clients } = await supabase
-    .from('clients')
-    .select('id, name, phone, tier')
-    .order('created_at', { ascending: false });
+  const [{ data: clients }, { data: vals }] = await Promise.all([
+    supabase.from('clients').select('id, name, phone, tier').order('created_at', { ascending: false }),
+    supabase.from('client_valuation').select('client_id, invested_value, current_value, unrealized_pl'),
+  ]);
 
-  const rows = clients ?? [];
+  const vmap = new Map((vals ?? []).map((v) => [v.client_id, v]));
+  const rows = (clients ?? []).map((c) => {
+    const v = vmap.get(c.id);
+    const invested = Number(v?.invested_value ?? 0);
+    const current = Number(v?.current_value ?? 0);
+    const pl = Number(v?.unrealized_pl ?? 0);
+    const plPct = invested ? (pl / invested) * 100 : 0;
+    return { ...c, invested, current, pl, plPct };
+  });
 
   return (
     <>
@@ -19,6 +28,9 @@ export default async function ClientsPage() {
           <div className="eyebrow">{rows.length} client{rows.length === 1 ? '' : 's'}</div>
           <h1>Clients</h1>
           <p>Click a client to open their portfolio, or download their report.</p>
+        </div>
+        <div className="head-tools">
+          <ImportPortfolioModal />
         </div>
       </div>
 
