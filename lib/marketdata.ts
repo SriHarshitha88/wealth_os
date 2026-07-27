@@ -18,17 +18,24 @@ export async function fetchNseSymbols(): Promise<SymbolRow[]> {
   return data.map((s) => ({ symbol: s.symbol, name: s.name || s.symbol, exchange: 'NSE' }));
 }
 
-export type Quote = { symbol: string; price: number; prevClose: number };
+export type Quote = { symbol: string; exchange: string; price: number; prevClose: number };
+export type QuoteInput = string | { symbol: string; exchange?: string };
 
-// Live prices from Yahoo Finance. NSE tickers use the ".NS" suffix.
+// Yahoo suffixes NSE tickers with ".NS" and BSE tickers with ".BO".
+const yahooSuffix = (exchange?: string) => (exchange === 'BSE' ? '.BO' : '.NS');
+
+// Live prices from Yahoo Finance. Accepts bare symbols (assumed NSE) or
+// {symbol, exchange} so BSE-listed scrips resolve to the right ".BO" ticker.
 // One request per symbol (Yahoo's free chart endpoint), run in parallel.
-export async function getQuotes(symbols: string[]): Promise<Quote[]> {
-  if (symbols.length === 0) return [];
+export async function getQuotes(inputs: QuoteInput[]): Promise<Quote[]> {
+  if (inputs.length === 0) return [];
 
   const results = await Promise.all(
-    symbols.map(async (sym): Promise<Quote | null> => {
+    inputs.map(async (inp): Promise<Quote | null> => {
+      const symbol = typeof inp === 'string' ? inp : inp.symbol;
+      const exchange = typeof inp === 'string' ? 'NSE' : inp.exchange ?? 'NSE';
       try {
-        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}.NS?interval=1d&range=1d`;
+        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}${yahooSuffix(exchange)}?interval=1d&range=1d`;
         const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, cache: 'no-store' });
         const json = await res.json();
         const meta = json?.chart?.result?.[0]?.meta;
@@ -36,7 +43,7 @@ export async function getQuotes(symbols: string[]): Promise<Quote[]> {
         if (price == null) return null;
         const prevClose =
           meta.chartPreviousClose ?? meta.previousClose ?? meta.regularMarketPreviousClose ?? price;
-        return { symbol: sym, price: Number(price), prevClose: Number(prevClose) };
+        return { symbol, exchange, price: Number(price), prevClose: Number(prevClose) };
       } catch {
         return null;
       }

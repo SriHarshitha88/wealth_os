@@ -11,35 +11,41 @@ const admin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY,
 );
 
-const { data: held } = await admin.from('holdings').select('security_id, securities(symbol)');
-const map = new Map();
+const { data: held } = await admin.from('holdings').select('security_id, securities(symbol, exchange)');
+const suffix = (exchange) => (exchange === 'BSE' ? '.BO' : '.NS');
+const seen = new Set();
+const rows = [];
 for (const r of held ?? []) {
   const rel = r.securities;
-  const sym = Array.isArray(rel) ? rel[0]?.symbol : rel?.symbol;
-  if (sym) map.set(sym, r.security_id);
+  const sec = Array.isArray(rel) ? rel[0] : rel;
+  if (!sec?.symbol) continue;
+  const exchange = sec.exchange ?? 'NSE';
+  const k = `${exchange}:${sec.symbol}`;
+  if (seen.has(k)) continue;
+  seen.add(k);
+  rows.push({ symbol: sec.symbol, exchange, id: r.security_id });
 }
 
-const symbols = [...map.keys()];
 let updated = 0;
-for (const sym of symbols) {
+for (const { symbol, exchange, id } of rows) {
   try {
     const res = await fetch(
-      `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}.NS?interval=1d&range=1d`,
+      `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}${suffix(exchange)}?interval=1d&range=1d`,
       { headers: { 'User-Agent': 'Mozilla/5.0' } },
     );
     const j = await res.json();
     const m = j?.chart?.result?.[0]?.meta;
-    if (m?.regularMarketPrice == null) { console.log(`  ${sym}: no price`); continue; }
+    if (m?.regularMarketPrice == null) { console.log(`  ${symbol}.${exchange}: no price`); continue; }
     const price = Number(m.regularMarketPrice);
     const prev = Number(m.chartPreviousClose ?? m.previousClose ?? price);
     await admin
       .from('securities')
       .update({ last_price: price, prev_close: prev, last_price_at: new Date().toISOString() })
-      .eq('id', map.get(sym));
-    console.log(`  ${sym}: ₹${price}`);
+      .eq('id', id);
+    console.log(`  ${symbol}.${exchange}: ₹${price}`);
     updated++;
   } catch (e) {
-    console.log(`  ${sym}: error ${e.message}`);
+    console.log(`  ${symbol}.${exchange}: error ${e.message}`);
   }
 }
-console.log(`Updated ${updated} of ${symbols.length} held stocks.`);
+console.log(`Updated ${updated} of ${rows.length} held stocks.`);

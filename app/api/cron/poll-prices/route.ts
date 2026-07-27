@@ -22,16 +22,22 @@ export async function GET(request: NextRequest) {
   // Unique held securities only (keeps us inside the free-tier call budget).
   const { data: held } = await admin
     .from('holdings')
-    .select('security_id, securities(symbol)');
+    .select('security_id, securities(symbol, exchange)');
 
-  const symbolToId = new Map<string, number>();
+  const key = (symbol: string, exchange: string) => `${exchange}:${symbol}`;
+  const idByKey = new Map<string, number>();
+  const inputs: { symbol: string; exchange: string }[] = [];
   for (const row of held ?? []) {
     const rel = (row as any).securities;
-    const sym = Array.isArray(rel) ? rel[0]?.symbol : rel?.symbol;
-    if (sym) symbolToId.set(sym, (row as any).security_id);
+    const sec = Array.isArray(rel) ? rel[0] : rel;
+    if (!sec?.symbol) continue;
+    const exchange = sec.exchange ?? 'NSE';
+    const k = key(sec.symbol, exchange);
+    if (idByKey.has(k)) continue;
+    idByKey.set(k, (row as any).security_id);
+    inputs.push({ symbol: sec.symbol, exchange });
   }
-  const symbols = [...symbolToId.keys()];
-  if (symbols.length === 0) {
+  if (inputs.length === 0) {
     return NextResponse.json({ updated: 0, note: 'no held securities yet' });
   }
 
@@ -39,10 +45,10 @@ export async function GET(request: NextRequest) {
     const now = new Date().toISOString();
     let updated = 0;
     // Chunk into batches of 50 symbols per request.
-    for (let i = 0; i < symbols.length; i += 50) {
-      const quotes = await getQuotes(symbols.slice(i, i + 50));
+    for (let i = 0; i < inputs.length; i += 50) {
+      const quotes = await getQuotes(inputs.slice(i, i + 50));
       for (const q of quotes) {
-        const id = symbolToId.get(q.symbol);
+        const id = idByKey.get(key(q.symbol, q.exchange));
         if (!id) continue;
         await admin
           .from('securities')
