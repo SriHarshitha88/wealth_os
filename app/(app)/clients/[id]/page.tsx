@@ -1,9 +1,16 @@
 import { createClient } from '@/lib/supabase/server';
-import { cr, inr, pct } from '@/lib/format';
+import { cr, pct } from '@/lib/format';
+import { computePosition } from '@/lib/portfolio-calc';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
+import ClientTransactions from '@/components/ClientTransactions';
+import ClientHoldings from '@/components/ClientHoldings';
 
 export const dynamic = 'force-dynamic';
+
+function rel(sec: any) {
+  return Array.isArray(sec) ? sec[0] : sec;
+}
 
 export default async function ClientDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -12,28 +19,55 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
   const { data: client } = await supabase.from('clients').select('*').eq('id', id).maybeSingle();
   if (!client) notFound();
 
-  const { data: holdings } = await supabase
-    .from('holdings')
-    .select('quantity, avg_price, securities(symbol, name, last_price)')
-    .eq('client_id', id);
+  // The transaction ledger is the source of truth for everything on this page.
+  const { data: txns } = await supabase
+    .from('transactions')
+    .select('id, side, quantity, price, traded_at, security_id, securities(symbol, name, last_price)')
+    .eq('client_id', id)
+    .order('traded_at', { ascending: false });
 
-  const rows = (holdings ?? []).map((h) => {
-    const relRaw = (h as any).securities;
-    const sec = Array.isArray(relRaw) ? relRaw[0] : relRaw;
-    const qty = Number(h.quantity);
-    const avg = Number(h.avg_price);
+  // Group by security and replay FIFO to get qty, avg cost, invested, realised.
+  const bySec = new Map<number, { sec: any; txns: any[] }>();
+  for (const t of txns ?? []) {
+    const sec = rel((t as any).securities);
+    const e = bySec.get(t.security_id) ?? { sec, txns: [] };
+    e.txns.push(t);
+    bySec.set(t.security_id, e);
+  }
+
+  const positions = [...bySec.entries()].map(([securityId, { sec, txns }]) => {
+    const pos = computePosition(txns);
     const cur = sec?.last_price != null ? Number(sec.last_price) : null;
-    const investedValue = qty * avg;
-    const currentValue = cur != null ? qty * cur : null;
-    const pl = currentValue != null ? currentValue - investedValue : null;
-    const ret = pl != null && investedValue ? (pl / investedValue) * 100 : null;
-    return { symbol: sec?.symbol ?? '—', name: sec?.name ?? '', qty, avg, cur, investedValue, currentValue, pl, ret };
+    const current = cur != null ? pos.qty * cur : null;
+    const pl = current != null ? current - pos.invested : null;
+    const ret = pl != null && pos.invested ? (pl / pos.invested) * 100 : null;
+    // A holding backed by a single Buy (e.g. one import row) can be edited inline;
+    // multi-trade holdings must be edited trade-by-trade in the Transactions ledger.
+    const singleBuyId = txns.length === 1 && txns[0].side === 'Buy' ? String(txns[0].id) : null;
+    return {
+      securityId, singleBuyId,
+      symbol: sec?.symbol ?? '—', name: sec?.name ?? '', qty: pos.qty, avg: pos.avgCost,
+      cur, invested: pos.invested, current, pl, ret, realised: pos.realised,
+    };
   });
 
-  const invested = rows.reduce((a, r) => a + r.investedValue, 0);
-  const current = rows.reduce((a, r) => a + (r.currentValue ?? r.investedValue), 0);
+  const open = positions.filter((r) => r.qty > 1e-9).sort((a, b) => (b.current ?? 0) - (a.current ?? 0));
+  const closed = positions.filter((r) => r.qty <= 1e-9 && Math.abs(r.realised) > 0.005);
+  const holdingRows = [
+    ...open.map((r) => ({ ...r, closed: false })),
+    ...closed.map((r) => ({ ...r, closed: true })),
+  ];
+
+  const invested = open.reduce((a, r) => a + r.invested, 0);
+  const current = open.reduce((a, r) => a + (r.current ?? r.invested), 0);
   const pl = current - invested;
   const plPct = invested ? (pl / invested) * 100 : 0;
+  const realisedTotal = positions.reduce((a, r) => a + r.realised, 0);
+
+  const ledger = (txns ?? []).map((t) => {
+    const sec = rel((t as any).securities);
+    return { id: t.id, side: t.side, symbol: sec?.symbol ?? '—', name: sec?.name ?? '', qty: Number(t.quantity), price: Number(t.price), tradedAt: t.traded_at };
+  });
 
   return (
     <>
@@ -59,7 +93,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
         <div className="kpi feature">
           <div className="eyebrow">Current value</div>
           <div className="val">{cr(current)}</div>
-          <div className="meta">across {rows.length} holdings</div>
+          <div className="meta">across {open.length} holdings</div>
         </div>
         <div className="kpi">
           <div className="eyebrow">Invested</div>
@@ -72,57 +106,15 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
           <div className="meta"><span className="delta" style={{ color: pl >= 0 ? 'var(--gain)' : 'var(--loss)' }}>{pct(plPct)}</span> absolute</div>
         </div>
         <div className="kpi">
-          <div className="eyebrow">Holdings</div>
-          <div className="val">{rows.length}</div>
-          <div className="meta">stocks</div>
+          <div className="eyebrow">Realized P/L</div>
+          <div className="val" style={{ color: realisedTotal >= 0 ? 'var(--gain)' : 'var(--loss)' }}>{cr(realisedTotal)}</div>
+          <div className="meta">booked on sells</div>
         </div>
       </div>
 
-      <div className="card">
-        {rows.length === 0 ? (
-          <div className="empty">
-            <p style={{ fontFamily: 'var(--serif)', fontSize: 18, marginBottom: 6 }}>No holdings yet.</p>
-            <p style={{ color: 'var(--ink-3)', margin: 0 }}>Record a Buy for this client to see it here.</p>
-          </div>
-        ) : (
-          <div className="twrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Stock</th><th>Qty</th><th>Invested price</th><th>Current price</th>
-                  <th>Invested</th><th>Current</th><th>P/L</th><th>Return</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => (
-                  <tr key={r.symbol}>
-                    <td>
-                      <div className="cell-name">
-                        <div className="avatar" style={{ borderRadius: 8, fontSize: 11 }}>{r.symbol.slice(0, 4)}</div>
-                        <div>
-                          <div style={{ fontWeight: 600 }}>{r.symbol}</div>
-                          <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>{r.name}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td>{r.qty.toLocaleString('en-IN')}</td>
-                    <td>{inr(r.avg)}</td>
-                    <td>{r.cur != null ? inr(r.cur) : '—'}</td>
-                    <td>{cr(r.investedValue)}</td>
-                    <td>{r.currentValue != null ? cr(r.currentValue) : '—'}</td>
-                    <td className={r.pl == null ? '' : r.pl >= 0 ? 'num-pos' : 'num-neg'}>
-                      {r.pl != null ? cr(r.pl) : '—'}
-                    </td>
-                    <td className={r.ret == null ? '' : r.ret >= 0 ? 'num-pos' : 'num-neg'}>
-                      {r.ret != null ? pct(r.ret) : '—'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      <ClientHoldings clientId={id} rows={holdingRows} />
+
+      <ClientTransactions clientId={id} rows={ledger} />
     </>
   );
 }

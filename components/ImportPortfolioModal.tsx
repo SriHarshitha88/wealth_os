@@ -45,7 +45,7 @@ export default function ImportPortfolioModal() {
     const res = await importPortfolio(fd);
     setBusy(false);
     if (!res.ok) { setError(res.error ?? 'Import failed.'); return; }
-    setDone(`Imported ${res.count} holding${res.count === 1 ? '' : 's'} for ${name.trim()}.`);
+    setDone(`Imported ${res.trades} trade${res.trades === 1 ? '' : 's'} → ${res.count} holding${res.count === 1 ? '' : 's'} for ${name.trim()}.`);
     router.refresh();
   }
 
@@ -63,7 +63,7 @@ export default function ImportPortfolioModal() {
           <div className="modal">
             <div className="modal-head">
               <h3>Import portfolio from Excel</h3>
-              <p>Upload a broker holdings sheet (.xlsx). Each row becomes a stock in this client&rsquo;s portfolio.</p>
+              <p>Upload a holdings summary (one row per stock) or a tradebook (one row per trade, with its own date &amp; buy/sell).</p>
             </div>
             <form onSubmit={submit}>
               <div className="modal-body">
@@ -87,7 +87,7 @@ export default function ImportPortfolioModal() {
                 </div>
 
                 <div className="field">
-                  <label htmlFor="i-date">Purchase date <span style={{ color: 'var(--ink-4)', fontWeight: 500 }}>(applies to all rows)</span></label>
+                  <label htmlFor="i-date">Purchase date <span style={{ color: 'var(--ink-4)', fontWeight: 500 }}>(fallback — used only for rows with no date)</span></label>
                   <input id="i-date" type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} />
                 </div>
 
@@ -96,7 +96,7 @@ export default function ImportPortfolioModal() {
                   <input id="i-file" ref={fileRef} type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     onChange={(e) => setFileName(e.target.files?.[0]?.name ?? '')} />
                   {fileName && <p className="help">Selected: {fileName}</p>}
-                  <p className="help">Needs columns for company/name, quantity, and average/buy price. A symbol and current-price column are used if present.</p>
+                  <p className="help">Needs columns for company/name, quantity, and price. Optional columns are used if present: symbol, current price, <strong>trade date</strong>, and <strong>buy/sell</strong> (for a tradebook). You can edit any trade afterwards on the client&rsquo;s page.</p>
                 </div>
 
                 {error && <p className="error-text">{error}</p>}

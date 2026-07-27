@@ -47,11 +47,10 @@ const s = StyleSheet.create({
   rowAlt: { backgroundColor: ZEBRA },
   totalRow: { flexDirection: 'row', backgroundColor: BAND, paddingVertical: 7, paddingHorizontal: 4, borderTopWidth: 1, borderTopColor: BRAND },
 
-  cSec: { width: '28%' },
-  cCat: { width: '15%' },
-  cQty: { width: '9%', textAlign: 'right' },
-  cVal: { width: '12.5%', textAlign: 'right' },
-  cPct: { width: '10.5%', textAlign: 'right' },
+  cSec: { width: '24%' },
+  cQty: { width: '7%', textAlign: 'right' },
+  cVal: { width: '14.25%', textAlign: 'right' },
+  cPct: { width: '12%', textAlign: 'right' },
 
   secName: { fontSize: 8.5, fontFamily: 'Helvetica-Bold' },
   secSym: { fontSize: 7, color: MUTE, marginTop: 1 },
@@ -65,12 +64,12 @@ const s = StyleSheet.create({
 
 export type ReportRow = {
   symbol: string; name: string; sector: string | null; qty: number; avg: number; cur: number | null;
-  investedValue: number; currentValue: number | null; pl: number | null; ret: number | null;
+  investedValue: number; currentValue: number | null; pl: number | null; ret: number | null; realised: number;
 };
 export type ReportData = {
   client: { name: string; phone: string; email: string | null; tier: string };
   rows: ReportRow[];
-  totals: { invested: number; current: number; pl: number; plPct: number };
+  totals: { invested: number; current: number; pl: number; plPct: number; realised: number };
   generatedAt: string;
   logo?: string | null; // data URI of the Ashesha lockup
 };
@@ -114,36 +113,39 @@ export default function ClientReportPdf({ client, rows, totals, generatedAt, log
         <Text style={s.sectionTitle}>Stocks</Text>
         <View style={s.thead} fixed>
           <Text style={[s.th, s.cSec]}>Security Name</Text>
-          <Text style={[s.th, s.cCat]}>Sector / Category</Text>
           <Text style={[s.th, s.cQty]}>Quantity</Text>
           <Text style={[s.th, s.cVal]}>Current Value* Rs</Text>
           <Text style={[s.th, s.cVal]}>Value at Cost Rs</Text>
           <Text style={[s.th, s.cVal]}>Unrealised Gain / (Loss) Rs</Text>
+          <Text style={[s.th, s.cVal]}>Realised Gain / (Loss) Rs</Text>
           <Text style={[s.th, s.cPct]}>Gain / (Loss) %</Text>
         </View>
 
-        {rows.map((r, i) => (
-          <View style={[s.row, i % 2 === 1 ? s.rowAlt : {}]} key={i} wrap={false}>
-            <View style={s.cSec}>
-              <Text style={s.secName}>{r.name || r.symbol}</Text>
-              <Text style={s.secSym}>{r.symbol}</Text>
+        {rows.map((r, i) => {
+          const closed = r.qty <= 1e-9;
+          return (
+            <View style={[s.row, i % 2 === 1 ? s.rowAlt : {}]} key={i} wrap={false}>
+              <View style={s.cSec}>
+                <Text style={s.secName}>{r.name || r.symbol}{closed ? '  (closed)' : ''}</Text>
+                <Text style={s.secSym}>{r.symbol}</Text>
+              </View>
+              <Text style={[s.cell, s.cQty]}>{closed ? '-' : qtyf(r.qty)}</Text>
+              <Text style={[s.cell, s.cVal]}>{r.currentValue != null ? num(r.currentValue) : '-'}</Text>
+              <Text style={[s.cell, s.cVal]}>{closed ? '-' : num(r.investedValue)}</Text>
+              <Text style={[s.cell, s.cVal, { color: glColor(r.pl) }]}>{r.pl != null ? gl(r.pl) : '-'}</Text>
+              <Text style={[s.cell, s.cVal, { color: glColor(Math.abs(r.realised) < 0.005 ? null : r.realised) }]}>{Math.abs(r.realised) < 0.005 ? '-' : gl(r.realised)}</Text>
+              <Text style={[s.cell, s.cPct, { color: glColor(r.pl) }]}>{r.ret != null ? pctf(r.ret) : '-'}</Text>
             </View>
-            <Text style={[s.cell, s.cCat]}>{r.sector || '-'}</Text>
-            <Text style={[s.cell, s.cQty]}>{qtyf(r.qty)}</Text>
-            <Text style={[s.cell, s.cVal]}>{r.currentValue != null ? num(r.currentValue) : '-'}</Text>
-            <Text style={[s.cell, s.cVal]}>{num(r.investedValue)}</Text>
-            <Text style={[s.cell, s.cVal, { color: glColor(r.pl) }]}>{r.pl != null ? gl(r.pl) : '-'}</Text>
-            <Text style={[s.cell, s.cPct, { color: glColor(r.pl) }]}>{r.ret != null ? pctf(r.ret) : '-'}</Text>
-          </View>
-        ))}
+          );
+        })}
 
         <View style={s.totalRow}>
           <Text style={[s.bold, s.cSec, { fontSize: 8.5 }]}>Total Stocks</Text>
-          <Text style={s.cCat}> </Text>
           <Text style={s.cQty}> </Text>
           <Text style={[s.bold, s.cVal, { fontSize: 8.5 }]}>{num(totals.current)}</Text>
           <Text style={[s.bold, s.cVal, { fontSize: 8.5 }]}>{num(totals.invested)}</Text>
           <Text style={[s.bold, s.cVal, { fontSize: 8.5, color: glColor(totals.pl) }]}>{gl(totals.pl)}</Text>
+          <Text style={[s.bold, s.cVal, { fontSize: 8.5, color: glColor(Math.abs(totals.realised) < 0.005 ? null : totals.realised) }]}>{Math.abs(totals.realised) < 0.005 ? '-' : gl(totals.realised)}</Text>
           <Text style={[s.bold, s.cPct, { fontSize: 8.5, color: glColor(totals.pl) }]}>{pctf(totals.plPct)}</Text>
         </View>
 

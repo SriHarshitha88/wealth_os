@@ -4,6 +4,7 @@ import { createElement } from 'react';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createClient } from '@/lib/supabase/server';
+import { computePosition } from '@/lib/portfolio-calc';
 import ClientReportPdf, { type ReportRow } from '@/components/ClientReportPdf';
 
 // Load the Ashesha lockup once and cache it as a data URI for the PDF header.
@@ -32,27 +33,42 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const { data: client } = await supabase.from('clients').select('name, phone, email, tier').eq('id', id).maybeSingle();
   if (!client) return new Response('Client not found', { status: 404 });
 
-  const { data: holdings } = await supabase
-    .from('holdings')
-    .select('quantity, avg_price, securities(symbol, name, sector, last_price)')
+  // Build positions from the transaction ledger (FIFO) so realised P/L is included.
+  const { data: txns } = await supabase
+    .from('transactions')
+    .select('side, quantity, price, traded_at, security_id, securities(symbol, name, sector, last_price)')
     .eq('client_id', id);
 
-  const rows: ReportRow[] = (holdings ?? []).map((h) => {
-    const sec = rel((h as any).securities);
-    const qty = Number(h.quantity);
-    const avg = Number(h.avg_price);
+  const bySec = new Map<number, { sec: any; txns: any[] }>();
+  for (const t of txns ?? []) {
+    const sec = rel((t as any).securities);
+    const e = bySec.get(t.security_id) ?? { sec, txns: [] };
+    e.txns.push(t);
+    bySec.set(t.security_id, e);
+  }
+
+  const positions: ReportRow[] = [...bySec.values()].map(({ sec, txns }) => {
+    const pos = computePosition(txns);
     const cur = sec?.last_price != null ? Number(sec.last_price) : null;
-    const investedValue = qty * avg;
-    const currentValue = cur != null ? qty * cur : null;
-    const pl = currentValue != null ? currentValue - investedValue : null;
-    const ret = pl != null && investedValue ? (pl / investedValue) * 100 : null;
-    return { symbol: sec?.symbol ?? '-', name: sec?.name ?? '', sector: sec?.sector ?? null, qty, avg, cur, investedValue, currentValue, pl, ret };
+    const currentValue = cur != null && pos.qty > 1e-9 ? pos.qty * cur : null;
+    const pl = currentValue != null ? currentValue - pos.invested : null;
+    const ret = pl != null && pos.invested ? (pl / pos.invested) * 100 : null;
+    return {
+      symbol: sec?.symbol ?? '-', name: sec?.name ?? '', sector: sec?.sector ?? null,
+      qty: pos.qty, avg: pos.avgCost, cur,
+      investedValue: pos.invested, currentValue, pl, ret, realised: pos.realised,
+    };
   });
 
-  const invested = rows.reduce((a, r) => a + r.investedValue, 0);
-  const current = rows.reduce((a, r) => a + (r.currentValue ?? r.investedValue), 0);
+  const open = positions.filter((r) => r.qty > 1e-9).sort((a, b) => (b.currentValue ?? 0) - (a.currentValue ?? 0));
+  const closed = positions.filter((r) => r.qty <= 1e-9 && Math.abs(r.realised) > 0.005);
+  const rows: ReportRow[] = [...open, ...closed];
+
+  const invested = open.reduce((a, r) => a + r.investedValue, 0);
+  const current = open.reduce((a, r) => a + (r.currentValue ?? r.investedValue), 0);
   const pl = current - invested;
-  const totals = { invested, current, pl, plPct: invested ? (pl / invested) * 100 : 0 };
+  const realised = positions.reduce((a, r) => a + r.realised, 0);
+  const totals = { invested, current, pl, plPct: invested ? (pl / invested) * 100 : 0, realised };
 
   const generatedAt = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kolkata' });
   const logo = await getLogo();

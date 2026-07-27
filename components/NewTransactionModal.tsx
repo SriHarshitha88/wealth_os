@@ -22,6 +22,7 @@ export default function NewTransactionModal() {
   const [security, setSecurity] = useState<Security | null>(null);
   const [qty, setQty] = useState('');
   const [price, setPrice] = useState('');
+  const [date, setDate] = useState(new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }));
   const [results, setResults] = useState<Security[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -61,6 +62,7 @@ export default function NewTransactionModal() {
   function reset() {
     setSide('Buy'); setName(''); setPhone(''); setEmail('');
     setStockQuery(''); setSecurity(null); setQty(''); setPrice(''); setError('');
+    setDate(new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }));
   }
 
   async function pick(s: Security) {
@@ -98,6 +100,7 @@ export default function NewTransactionModal() {
       side,
       quantity: parseFloat(qty) || 0,
       price: parseFloat(price) || 0,
+      tradedAt: date || undefined,
     });
     setBusy(false);
     if (!res.ok) { setError(res.error ?? 'Something went wrong.'); return; }
@@ -195,6 +198,11 @@ export default function NewTransactionModal() {
                     <button type="button" aria-label="Increase quantity" onClick={() => stepQty(1)}>+</button>
                   </div>
                 </div>
+              </div>
+
+              <div className="field">
+                <label htmlFor="t-date">Trade date</label>
+                <input id="t-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
               </div>
 
               <div className="txn-total"><span className="lbl">Total value</span>

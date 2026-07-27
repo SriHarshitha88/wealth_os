@@ -1,14 +1,45 @@
 import ExcelJS from 'exceljs';
 
-// One holding parsed out of an uploaded broker/portfolio spreadsheet.
+// One row parsed out of an uploaded spreadsheet. A holdings summary yields one
+// Buy row per stock; a tradebook yields one row per trade (with its own date & side).
 export type ImportRow = {
   symbol: string;
   name: string;
   qty: number;
-  avg: number;        // average cost / buy price
-  cmp: number | null; // current market price, if the sheet has it
+  avg: number;         // average cost / buy price / trade price
+  cmp: number | null;  // current market price, if the sheet has it
   prev: number | null; // previous close, derived from a "% change" column if present
+  side: 'Buy' | 'Sell';
+  date: string | null; // yyyy-mm-dd if the row carries its own trade date
 };
+
+export type ParsedImport = { rows: ImportRow[]; mode: 'summary' | 'tradebook' };
+
+function toDateStr(v: unknown): string | null {
+  if (v == null || v === '') return null;
+  if (v instanceof Date && !isNaN(v.getTime())) {
+    return `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}-${String(v.getDate()).padStart(2, '0')}`;
+  }
+  const s = String(v).trim();
+  // dd/mm/yyyy or dd-mm-yyyy
+  const m = s.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$/);
+  if (m) {
+    const [, d, mo, y] = m;
+    const yr = y.length === 2 ? `20${y}` : y;
+    return `${yr}-${mo.padStart(2, '0')}-${d.padStart(2, '0')}`;
+  }
+  const parsed = new Date(s);
+  if (!isNaN(parsed.getTime())) {
+    return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')}`;
+  }
+  return null;
+}
+
+function toSide(v: unknown): 'Buy' | 'Sell' {
+  const s = norm(v);
+  if (s.startsWith('s') || s.includes('sell') || s.includes('sold')) return 'Sell';
+  return 'Buy';
+}
 
 const norm = (s: unknown) => String(s ?? '').trim().toLowerCase();
 
@@ -36,7 +67,7 @@ function locateHeader(rows: unknown[][]): number {
  * Parse an uploaded .xlsx into holdings rows. Column matching is by header name
  * (case-insensitive, substring) so it tolerates different broker layouts.
  */
-export async function parsePortfolioWorkbook(buf: ArrayBuffer): Promise<ImportRow[]> {
+export async function parsePortfolioWorkbook(buf: ArrayBuffer): Promise<ParsedImport> {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buf);
   const ws = wb.worksheets[0];
@@ -54,13 +85,18 @@ export async function parsePortfolioWorkbook(buf: ArrayBuffer): Promise<ImportRo
   const iSym = findCol(headers, ['symbol', 'ticker', 'scrip', 'code']);
   const iName = findCol(headers, ['company', 'security name', 'stock name', 'name', 'security']);
   const iQty = findCol(headers, ['qty', 'quantity', 'units', 'shares']);
-  const iAvg = findCol(headers, ['average cost', 'avg cost', 'avg price', 'buy price', 'cost price', 'average', 'purchase price']);
+  const iAvg = findCol(headers, ['average cost', 'avg cost', 'avg price', 'buy price', 'cost price', 'average', 'purchase price', 'trade price', 'price', 'rate']);
   const iCmp = findCol(headers, ['current market', 'market price', 'cmp', 'ltp', 'current price', 'last price', 'closing price']);
   const iPct = findCol(headers, ['% change', 'change over prev', 'day change', 'change %']);
+  const iDate = findCol(headers, ['trade date', 'txn date', 'transaction date', 'buy date', 'purchase date', 'date']);
+  const iSide = findCol(headers, ['side', 'transaction type', 'trade type', 'buy/sell', 'action', 'type']);
 
   if (iName < 0 || iQty < 0 || iAvg < 0) {
-    throw new Error('Could not find the required columns. The sheet needs at least a company/name, a quantity, and an average/buy price column.');
+    throw new Error('Could not find the required columns. The sheet needs at least a company/name, a quantity, and a price (average/buy/trade) column.');
   }
+
+  // A per-row date or a buy/sell column means it's a tradebook (one row = one trade).
+  const mode: 'summary' | 'tradebook' = iDate >= 0 || iSide >= 0 ? 'tradebook' : 'summary';
 
   const out: ImportRow[] = [];
   for (let r = hi + 1; r < rows.length; r++) {
@@ -77,10 +113,12 @@ export async function parsePortfolioWorkbook(buf: ArrayBuffer): Promise<ImportRo
     const pctN = iPct >= 0 ? Number(row[iPct]) : NaN;
     const cmp = isFinite(cmpN) ? +cmpN.toFixed(2) : null;
     const prev = cmp != null && isFinite(pctN) ? +(cmp / (1 + pctN / 100)).toFixed(2) : null;
+    const date = iDate >= 0 ? toDateStr(row[iDate]) : null;
+    const side = iSide >= 0 ? toSide(row[iSide]) : 'Buy';
 
-    out.push({ symbol, name, qty, avg: +avg.toFixed(2), cmp, prev });
+    out.push({ symbol, name, qty, avg: +avg.toFixed(2), cmp, prev, side, date });
   }
 
-  if (!out.length) throw new Error('No valid holdings were found in the sheet.');
-  return out;
+  if (!out.length) throw new Error('No valid rows were found in the sheet.');
+  return { rows: out, mode };
 }
