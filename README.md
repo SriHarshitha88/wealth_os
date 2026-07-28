@@ -83,7 +83,7 @@ supabase/schema.sql      Full data model + RLS
 ```
 
 ## Roadmap (we agreed to split this)
-- **Phase 1 (this repo):** auth, schema, dashboard, New Transaction → DB, price polling. ✅
+- **Phase 1 (this repo):** auth, schema, dashboard, New Transaction → DB, price polling. 
 - **Phase 2:** Clients CRM screen, Portfolio detail, holdings recompute on each transaction.
 - **Phase 3:** High-water-mark Fee Engine, Reports (PDF/Excel), AI Copilot, Client Portal.
 - **Phase 4:** WhatsApp/SMS (paid — Twilio/WhatsApp Business), corporate actions, mutual funds.
