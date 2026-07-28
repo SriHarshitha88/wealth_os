@@ -1,19 +1,20 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { computeFee, deriveState, BAND_RATES, BAND_STEP, ABOVE_RATE } from '@/lib/fee-schedule';
 import { revalidatePath } from 'next/cache';
 
 function rel(x: any) {
   return Array.isArray(x) ? x[0] : x;
 }
+const r2 = (n: number) => Math.round(n * 100) / 100;
 
 async function currentValue(supabase: any, clientId: string) {
   const { data } = await supabase
     .from('holdings')
     .select('quantity, avg_price, securities(last_price)')
     .eq('client_id', clientId);
-  let current = 0;
-  let invested = 0;
+  let current = 0, invested = 0;
   for (const h of data ?? []) {
     const sec = rel(h.securities);
     invested += Number(h.quantity) * Number(h.avg_price);
@@ -22,47 +23,84 @@ async function currentValue(supabase: any, clientId: string) {
   return { current, invested };
 }
 
-// Charge a performance fee when the portfolio has crossed its high-water trigger,
-// then reset the basis to the new high-water mark so the client is never double-charged.
-export async function raiseFee(clientId: string) {
-  const supabase = await createClient();
-
+// Shared context: capital snapshot, how far the ledger says we've billed, and the calc.
+async function feeContext(supabase: any, clientId: string) {
   const { current, invested } = await currentValue(supabase, clientId);
+  const { data: mark } = await supabase.from('fee_marks').select('last_basis').eq('client_id', clientId).maybeSingle();
+  const capital = mark && Number(mark.last_basis) > 0 ? Number(mark.last_basis) : invested;
+  const { data: feeRows } = await supabase.from('fees').select('invoice_no, amount, status').eq('client_id', clientId);
+  const { chargedBands, aboveSettled } = deriveState(feeRows ?? [], capital);
+  const calc = computeFee({ capital, current, chargedBands, aboveSettled });
+  return { current, invested, capital, chargedBands, aboveSettled, calc };
+}
 
-  const { data: mark } = await supabase
-    .from('fee_marks')
-    .select('last_basis, step_pct, fee_rate')
-    .eq('client_id', clientId)
-    .maybeSingle();
+async function pinCapital(supabase: any, clientId: string, capital: number, whenIso: string) {
+  await supabase.from('fee_marks').upsert(
+    { client_id: clientId, last_basis: capital, updated_at: whenIso },
+    { onConflict: 'client_id' },
+  );
+}
 
-  const basis = mark ? Number(mark.last_basis) : invested;
-  const step = mark ? Number(mark.step_pct) : 20;
-  const rate = mark ? Number(mark.fee_rate) : 15;
-  const trigger = basis * (1 + step / 100);
+// Bill every appreciation milestone the portfolio has crossed but not yet been
+// charged for — one ledger row per band — plus any flat 25% owed above +100%.
+// `paidDate` (yyyy-mm-dd, IST) lets you backfill; defaults to today.
+export async function raiseFee(clientId: string, paidDate?: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: 'Not signed in.' };
 
-  if (current < trigger) {
-    return { ok: false, error: 'Portfolio has not crossed the fee trigger yet.' };
+  const { capital, chargedBands, calc } = await feeContext(supabase, clientId);
+  if (calc.feeDue <= 0) return { ok: false, error: 'No new appreciation milestone has been crossed yet.' };
+
+  const day = paidDate && /^\d{4}-\d{2}-\d{2}$/.test(paidDate) ? paidDate : new Date().toISOString().slice(0, 10);
+  const paidAt = new Date(`${day}T12:00:00+05:30`).toISOString();
+  const bandValue = 0.2 * capital;
+
+  const rows: Record<string, unknown>[] = [];
+  for (let level = chargedBands + 1; level <= calc.reachedBands; level++) {
+    rows.push({
+      client_id: clientId, amount: r2((BAND_RATES[level - 1] / 100) * bandValue), status: 'Collected',
+      due_date: day, invoice_no: `PF-L${level}-${Date.now()}-${level}`, paid_at: paidAt,
+    });
   }
+  if (calc.aboveDue > 0) {
+    rows.push({
+      client_id: clientId, amount: calc.aboveDue, status: 'Collected',
+      due_date: day, invoice_no: `PF-ABOVE-${Date.now()}`, paid_at: paidAt,
+    });
+  }
+  const { error } = await supabase.from('fees').insert(rows);
+  if (error) return { ok: false, error: error.message };
+  await pinCapital(supabase, clientId, capital, paidAt);
 
-  const feeAmount = Math.round((rate / 100) * (current - basis) * 100) / 100;
+  revalidatePath('/fees'); revalidatePath('/dashboard');
+  return { ok: true, amount: calc.feeDue };
+}
 
-  const { error: fErr } = await supabase.from('fees').insert({
-    client_id: clientId,
-    amount: feeAmount,
-    status: 'Collected',
-    due_date: new Date().toISOString().slice(0, 10),
-    invoice_no: 'PF-' + Date.now(),
-    paid_at: new Date().toISOString(),
+// Record ONE milestone as paid on a specific date (backfilling offline payments,
+// e.g. a fee collected last month). Milestones must be settled in order.
+export async function recordMilestone(clientId: string, level: number, dateStr: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: 'Not signed in.' };
+  if (!(Number.isInteger(level) && level >= 1 && level <= BAND_RATES.length)) return { ok: false, error: 'Invalid milestone.' };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return { ok: false, error: 'Please pick a valid date.' };
+
+  const { capital, chargedBands, calc } = await feeContext(supabase, clientId);
+  if (!(capital > 0)) return { ok: false, error: 'Client has no invested capital yet.' };
+  if (level <= chargedBands) return { ok: false, error: `The +${level * BAND_STEP}% milestone is already billed.` };
+  if (level !== chargedBands + 1) return { ok: false, error: `Bill the +${(chargedBands + 1) * BAND_STEP}% milestone first — milestones are settled in order.` };
+  if (level > calc.reachedBands) return { ok: false, error: `The portfolio hasn't crossed +${level * BAND_STEP}% yet.` };
+
+  const fee = r2((BAND_RATES[level - 1] / 100) * (0.2 * capital));
+  const paidAt = new Date(`${dateStr}T12:00:00+05:30`).toISOString();
+  const { error } = await supabase.from('fees').insert({
+    client_id: clientId, amount: fee, status: 'Collected',
+    due_date: dateStr, invoice_no: `PF-L${level}-${Date.now()}-${level}`, paid_at: paidAt,
   });
-  if (fErr) return { ok: false, error: fErr.message };
+  if (error) return { ok: false, error: error.message };
+  await pinCapital(supabase, clientId, capital, paidAt);
 
-  // Reset the high-water mark to the current value.
-  const { error: mErr } = await supabase
-    .from('fee_marks')
-    .upsert({ client_id: clientId, last_basis: current, step_pct: step, fee_rate: rate, updated_at: new Date().toISOString() }, { onConflict: 'client_id' });
-  if (mErr) return { ok: false, error: mErr.message };
-
-  revalidatePath('/fees');
-  revalidatePath('/dashboard');
-  return { ok: true, amount: feeAmount };
+  revalidatePath('/fees'); revalidatePath('/dashboard');
+  return { ok: true, amount: fee };
 }

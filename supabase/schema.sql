@@ -17,9 +17,20 @@ create table profiles (
   id          uuid primary key references auth.users(id) on delete cascade,
   full_name   text,
   firm_name   text,
+  firm_id     uuid,                               -- advisors sharing a firm_id share their book
   role        text not null default 'advisor',   -- advisor | staff | admin
   created_at  timestamptz not null default now()
 );
+
+-- Is `owner` in the same firm as the calling user? SECURITY DEFINER so it can
+-- read profiles past their own RLS without recursion. Drives firm-shared access.
+create function public.same_firm(owner uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from profiles me join profiles o on o.firm_id = me.firm_id
+    where me.id = auth.uid() and o.id = owner and me.firm_id is not null
+  );
+$$;
 
 -- Auto-create a profile row when a new auth user signs up
 create function public.handle_new_user() returns trigger
@@ -148,23 +159,23 @@ create policy "own profile"        on profiles     for all  using (id = auth.uid
 -- securities: any signed-in user may read; only the service role (cron) writes
 create policy "read securities"    on securities   for select using (auth.role() = 'authenticated');
 
--- clients: owned by advisor
-create policy "own clients"        on clients      for all
-  using (advisor_id = auth.uid()) with check (advisor_id = auth.uid());
+-- clients: shared across the advisor's firm
+create policy "firm clients"       on clients      for all
+  using (same_firm(advisor_id)) with check (same_firm(advisor_id));
 
--- child tables: owned transitively through clients
-create policy "own transactions"   on transactions for all
-  using  (exists (select 1 from clients c where c.id = transactions.client_id and c.advisor_id = auth.uid()))
-  with check (exists (select 1 from clients c where c.id = transactions.client_id and c.advisor_id = auth.uid()));
+-- child tables: shared transitively through clients
+create policy "firm transactions"  on transactions for all
+  using  (exists (select 1 from clients c where c.id = transactions.client_id and same_firm(c.advisor_id)))
+  with check (exists (select 1 from clients c where c.id = transactions.client_id and same_firm(c.advisor_id)));
 
-create policy "own holdings"       on holdings     for all
-  using  (exists (select 1 from clients c where c.id = holdings.client_id and c.advisor_id = auth.uid()))
-  with check (exists (select 1 from clients c where c.id = holdings.client_id and c.advisor_id = auth.uid()));
+create policy "firm holdings"      on holdings     for all
+  using  (exists (select 1 from clients c where c.id = holdings.client_id and same_firm(c.advisor_id)))
+  with check (exists (select 1 from clients c where c.id = holdings.client_id and same_firm(c.advisor_id)));
 
-create policy "own fees"           on fees         for all
-  using  (exists (select 1 from clients c where c.id = fees.client_id and c.advisor_id = auth.uid()))
-  with check (exists (select 1 from clients c where c.id = fees.client_id and c.advisor_id = auth.uid()));
+create policy "firm fees"          on fees         for all
+  using  (exists (select 1 from clients c where c.id = fees.client_id and same_firm(c.advisor_id)))
+  with check (exists (select 1 from clients c where c.id = fees.client_id and same_firm(c.advisor_id)));
 
-create policy "own fee_marks"      on fee_marks    for all
-  using  (exists (select 1 from clients c where c.id = fee_marks.client_id and c.advisor_id = auth.uid()))
-  with check (exists (select 1 from clients c where c.id = fee_marks.client_id and c.advisor_id = auth.uid()));
+create policy "firm fee_marks"     on fee_marks    for all
+  using  (exists (select 1 from clients c where c.id = fee_marks.client_id and same_firm(c.advisor_id)))
+  with check (exists (select 1 from clients c where c.id = fee_marks.client_id and same_firm(c.advisor_id)));

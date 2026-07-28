@@ -34,8 +34,10 @@ export async function importPortfolio(formData: FormData) {
 
   // 1) find-or-create client
   let clientId: string;
+  // Match an existing client by phone within the firm (RLS scopes the read to
+  // the advisor's firm), so a firm-mate's client isn't duplicated.
   const { data: existing } = await supabase
-    .from('clients').select('id').eq('advisor_id', user.id).eq('phone', phone).maybeSingle();
+    .from('clients').select('id').eq('phone', phone).maybeSingle();
   if (existing) {
     clientId = existing.id;
   } else {

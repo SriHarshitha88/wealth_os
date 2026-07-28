@@ -2,6 +2,8 @@ import { type NextRequest } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { geminiGenerate } from '@/lib/gemini';
 import { getQuotes } from '@/lib/marketdata';
+import { computeFee, deriveState } from '@/lib/fee-schedule';
+import { fetchResultsOn } from '@/lib/nse-results';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -16,6 +18,7 @@ const SYSTEM = {
       'Always use the provided tools to fetch real data — never invent names, holdings, prices or numbers.',
       'All monetary amounts are Indian rupees; format them with a ₹ sign and Indian-style commas.',
       'Be concise and professional. Use short paragraphs or compact lists. If a tool returns nothing, say so plainly.',
+      'You can check NSE-filed quarterly results for a date (default today) with corporate_results — by default limited to stocks the book holds, so you can tell the advisor which of their holdings reported. It covers NSE quarterly-results filings only, not the full earnings calendar or guidance.',
       'If asked for something the tools cannot answer (e.g. a risk score we do not compute), say what you can and cannot see.',
     ].join(' '),
   }],
@@ -29,6 +32,7 @@ const TOOLS = [{
     { name: 'client_portfolio', description: 'Holdings with invested price, current price and P/L for one client, matched by name.', parameters: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] } },
     { name: 'fee_status', description: 'High-water-mark performance-fee status per client, including any fee currently due.', parameters: { type: 'object', properties: {} } },
     { name: 'market_price', description: 'Live price for an NSE stock symbol, or an index (NIFTY, SENSEX, BANKNIFTY).', parameters: { type: 'object', properties: { symbol: { type: 'string' } }, required: ['symbol'] } },
+    { name: 'corporate_results', description: "NSE-filed quarterly results announced on a date. Defaults to today and to only the stocks the book holds (with which clients hold each); pass scope 'all' for every NSE filing that day.", parameters: { type: 'object', properties: { scope: { type: 'string', description: "'held' (default) or 'all'" }, date: { type: 'string', description: 'optional DD-Mon-YYYY, e.g. 28-Jul-2026; default today' } } } },
   ],
 }];
 
@@ -95,16 +99,25 @@ async function dispatch(supabase: any, name: string, args: any) {
     case 'fee_status': {
       const { data: cl } = await supabase.from('clients').select('id, name');
       const rows = await valueRows(supabase);
-      const { data: marks } = await supabase.from('fee_marks').select('client_id, last_basis, step_pct, fee_rate');
+      const { data: marks } = await supabase.from('fee_marks').select('client_id, last_basis');
+      const { data: feeRows } = await supabase.from('fees').select('client_id, amount, status, invoice_no');
       const markBy = new Map((marks ?? []).map((m: any) => [m.client_id, m]));
+      const feesBy = new Map<string, any[]>();
+      for (const f of feeRows ?? []) { const a = feesBy.get(f.client_id) ?? []; a.push(f); feesBy.set(f.client_id, a); }
       return (cl ?? []).map((c: any) => {
         let cur = 0, inv = 0;
         for (const h of rows) { if (h.client_id !== c.id) continue; const s = rel(h.securities); inv += h.quantity * h.avg_price; if (s?.last_price != null) cur += h.quantity * s.last_price; }
         const m: any = markBy.get(c.id);
-        const basis = m ? Number(m.last_basis) : inv, step = m ? Number(m.step_pct) : 20, rate = m ? Number(m.fee_rate) : 15;
-        const trigger = basis * (1 + step / 100), crossed = cur >= trigger && cur > 0;
-        return { client: c.name, basis: r2(basis), current_value: r2(cur), trigger: r2(trigger), status: crossed ? 'Fee due' : cur < basis ? 'Below mark' : 'On track', fee_due: crossed ? r2((rate / 100) * (cur - basis)) : 0 };
-      }).filter((x: any) => x.current_value > 0 || x.basis > 0);
+        const capital = m && Number(m.last_basis) > 0 ? Number(m.last_basis) : inv;
+        const { chargedBands, aboveSettled } = deriveState(feesBy.get(c.id) ?? [], capital);
+        const calc = computeFee({ capital, current: cur, chargedBands, aboveSettled });
+        return {
+          client: c.name, capital: r2(capital), current_value: r2(cur),
+          appreciation_pct: r2(calc.gainPct), milestone_reached_pct: calc.reachedPct, milestone_billed_pct: chargedBands * 20,
+          next_milestone_pct: calc.nextMilestonePct, next_milestone_value: calc.nextMilestoneValue ? r2(calc.nextMilestoneValue) : null,
+          status: calc.feeDue > 0 ? 'Fee due' : cur < capital ? 'Below capital' : 'On track', fee_due: r2(calc.feeDue),
+        };
+      }).filter((x: any) => x.current_value > 0 || x.capital > 0);
     }
     case 'market_price': {
       const s = String(args.symbol ?? '').toUpperCase().replace(/\s/g, '');
@@ -112,6 +125,28 @@ async function dispatch(supabase: any, name: string, args: any) {
       if (idx[s]) { const q = await yahoo(idx[s]); return q ? { symbol: s, price: r2(q.price), prev_close: r2(q.prevClose) } : { error: 'no data' }; }
       const [q] = await getQuotes([s]);
       return q ? { symbol: s, price: r2(q.price), prev_close: r2(q.prevClose) } : { error: `No price for ${s}.` };
+    }
+    case 'corporate_results': {
+      let filings;
+      try { filings = await fetchResultsOn(args.date); }
+      catch (e: any) { return { error: `Couldn't reach the NSE results feed right now (${e.message}). Try again shortly.` }; }
+      const when = args.date ?? 'today';
+      if (String(args.scope) === 'all') {
+        return { date: when, scope: 'all', count: filings.length, results: filings.slice(0, 60) };
+      }
+      // held-only (default): intersect with the book and attach which clients hold each
+      const { data: hold } = await supabase.from('holdings').select('securities(symbol), clients(name)');
+      const holdersBySym = new Map<string, string[]>();
+      for (const h of hold ?? []) {
+        const sym = rel((h as any).securities)?.symbol?.toUpperCase();
+        const cn = rel((h as any).clients)?.name;
+        if (!sym) continue;
+        const arr = holdersBySym.get(sym) ?? [];
+        if (cn) arr.push(cn);
+        holdersBySym.set(sym, arr);
+      }
+      const held = filings.filter((f) => holdersBySym.has(f.symbol)).map((f) => ({ ...f, held_by: holdersBySym.get(f.symbol) }));
+      return { date: when, scope: 'held', held_count: held.length, results: held, note: held.length ? undefined : 'None of the stocks your clients hold filed results on that date.' };
     }
     default: return { error: 'unknown tool' };
   }

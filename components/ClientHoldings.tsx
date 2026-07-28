@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { addTransaction, updateTransaction } from '@/app/actions/transactions';
+import { resolveStocksLive } from '@/lib/stock-search';
 import { cr, inr, pct } from '@/lib/format';
 
 export type HoldingRow = {
@@ -14,7 +15,7 @@ export type HoldingRow = {
   invested: number; current: number | null; pl: number | null; ret: number | null; realised: number;
   closed: boolean;
 };
-type Security = { id: number; symbol: string; name: string; last_price: number | null };
+type Security = { id: number; symbol: string; name: string; exchange?: string; last_price: number | null };
 
 export default function ClientHoldings({ clientId, rows }: { clientId: string; rows: HoldingRow[] }) {
   const router = useRouter();
@@ -36,21 +37,30 @@ export default function ClientHoldings({ clientId, rows }: { clientId: string; r
   const [stockQuery, setStockQuery] = useState('');
   const [security, setSecurity] = useState<Security | null>(null);
   const [results, setResults] = useState<Security[]>([]);
+  const [resolving, setResolving] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [priceLoading, setPriceLoading] = useState(false);
   const comboRef = useRef<HTMLDivElement>(null);
 
-  // Live search of the securities table.
+  // Live search of the securities table; self-heal from Yahoo when nothing matches.
   useEffect(() => {
     if (!menuOpen) return;
     const q = stockQuery.trim();
-    if (q.length < 1) { setResults([]); return; }
+    if (q.length < 1) { setResults([]); setResolving(false); return; }
+    let cancelled = false;
     const t = setTimeout(async () => {
-      const { data } = await supabase.from('securities').select('id, symbol, name, last_price')
+      const { data } = await supabase.from('securities').select('id, symbol, name, exchange, last_price')
         .or(`name.ilike.%${q}%,symbol.ilike.%${q}%`).limit(15);
-      setResults(data ?? []);
-    }, 180);
-    return () => clearTimeout(t);
+      if (cancelled) return;
+      if (data && data.length) { setResults(data); setResolving(false); return; }
+      if (q.length < 2) { setResults([]); return; }
+      setResolving(true);
+      const live = await resolveStocksLive(q);
+      if (cancelled) return;
+      setResults(live);
+      setResolving(false);
+    }, 200);
+    return () => { cancelled = true; clearTimeout(t); };
   }, [stockQuery, menuOpen, supabase]);
 
   useEffect(() => {
@@ -83,7 +93,7 @@ export default function ClientHoldings({ clientId, rows }: { clientId: string; r
     // prefill the live current price (editable)
     setPriceLoading(true);
     try {
-      const res = await fetch(`/api/quote?symbol=${encodeURIComponent(s.symbol)}`);
+      const res = await fetch(`/api/quote?symbol=${encodeURIComponent(s.symbol)}&exchange=${s.exchange ?? 'NSE'}`);
       const j = await res.json();
       if (j.price != null) setAPrice(String(j.price));
       else if (s.last_price != null) setAPrice(String(s.last_price));
@@ -136,10 +146,10 @@ export default function ClientHoldings({ clientId, rows }: { clientId: string; r
                 onChange={(e) => { setStockQuery(e.target.value); setSecurity(null); setMenuOpen(true); }} />
               <div className={'combo-menu' + (menuOpen ? ' show' : '')}>
                 {results.length === 0 ? (
-                  <div className="combo-empty">{stockQuery.trim() ? 'No matches' : 'Type a company name'}</div>
+                  <div className="combo-empty">{resolving ? 'Searching live market…' : (stockQuery.trim() ? 'No matches' : 'Type a company name')}</div>
                 ) : results.map((s) => (
                   <div key={s.id} className="combo-item" onMouseDown={() => pick(s)}>
-                    <div><div className="nm">{s.name}</div><div className="sub">{s.symbol} · NSE</div></div>
+                    <div><div className="nm">{s.name}</div><div className="sub">{s.symbol} · {s.exchange ?? 'NSE'}</div></div>
                     {s.last_price != null && <div className="ltp">₹{Number(s.last_price).toLocaleString('en-IN')}</div>}
                   </div>
                 ))}

@@ -4,10 +4,11 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { addTransaction, updateTransaction, deleteTransaction } from '@/app/actions/transactions';
+import { resolveStocksLive } from '@/lib/stock-search';
 import { inr } from '@/lib/format';
 
 type Trade = { id: string; side: string; symbol: string; name: string; qty: number; price: number; tradedAt: string };
-type Security = { id: number; symbol: string; name: string; last_price: number | null };
+type Security = { id: number; symbol: string; name: string; exchange?: string; last_price: number | null };
 
 const IST = 'Asia/Kolkata';
 const toInputDate = (iso: string) => new Date(iso).toLocaleDateString('en-CA', { timeZone: IST }); // yyyy-mm-dd
@@ -30,18 +31,27 @@ export default function ClientTransactions({ clientId, rows }: { clientId: strin
   const [aDate, setADate] = useState(toInputDate(new Date().toISOString()));
   const [stockQuery, setStockQuery] = useState(''); const [security, setSecurity] = useState<Security | null>(null);
   const [results, setResults] = useState<Security[]>([]); const [menuOpen, setMenuOpen] = useState(false);
+  const [resolving, setResolving] = useState(false);
   const comboRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!menuOpen) return;
     const q = stockQuery.trim();
-    if (q.length < 1) { setResults([]); return; }
+    if (q.length < 1) { setResults([]); setResolving(false); return; }
+    let cancelled = false;
     const t = setTimeout(async () => {
-      const { data } = await supabase.from('securities').select('id, symbol, name, last_price')
+      const { data } = await supabase.from('securities').select('id, symbol, name, exchange, last_price')
         .or(`name.ilike.%${q}%,symbol.ilike.%${q}%`).limit(15);
-      setResults(data ?? []);
-    }, 180);
-    return () => clearTimeout(t);
+      if (cancelled) return;
+      if (data && data.length) { setResults(data); setResolving(false); return; }
+      if (q.length < 2) { setResults([]); return; }
+      setResolving(true);
+      const live = await resolveStocksLive(q);
+      if (cancelled) return;
+      setResults(live);
+      setResolving(false);
+    }, 200);
+    return () => { cancelled = true; clearTimeout(t); };
   }, [stockQuery, menuOpen, supabase]);
 
   useEffect(() => {
@@ -110,10 +120,10 @@ export default function ClientTransactions({ clientId, rows }: { clientId: strin
                 onChange={(e) => { setStockQuery(e.target.value); setSecurity(null); setMenuOpen(true); }} />
               <div className={'combo-menu' + (menuOpen ? ' show' : '')}>
                 {results.length === 0 ? (
-                  <div className="combo-empty">{stockQuery.trim() ? 'No matches' : 'Type a company name'}</div>
+                  <div className="combo-empty">{resolving ? 'Searching live market…' : (stockQuery.trim() ? 'No matches' : 'Type a company name')}</div>
                 ) : results.map((s) => (
                   <div key={s.id} className="combo-item" onMouseDown={() => pick(s)}>
-                    <div><div className="nm">{s.name}</div><div className="sub">{s.symbol}</div></div>
+                    <div><div className="nm">{s.name}</div><div className="sub">{s.symbol} · {s.exchange ?? 'NSE'}</div></div>
                     {s.last_price != null && <div className="ltp">₹{Number(s.last_price).toLocaleString('en-IN')}</div>}
                   </div>
                 ))}

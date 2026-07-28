@@ -5,8 +5,9 @@ import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { recordTransaction } from '@/app/actions/transactions';
+import { resolveStocksLive } from '@/lib/stock-search';
 
-type Security = { id: number; symbol: string; name: string; last_price: number | null };
+type Security = { id: number; symbol: string; name: string; exchange?: string; last_price: number | null };
 
 export default function NewTransactionModal() {
   const router = useRouter();
@@ -24,26 +25,36 @@ export default function NewTransactionModal() {
   const [price, setPrice] = useState('');
   const [date, setDate] = useState(new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }));
   const [results, setResults] = useState<Security[]>([]);
+  const [resolving, setResolving] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [priceLoading, setPriceLoading] = useState(false);
   const [error, setError] = useState('');
   const comboRef = useRef<HTMLDivElement>(null);
 
-  // Live search of the securities table (loaded from Angel One's instrument master).
+  // Live search of the securities table; if nothing matches locally, self-heal
+  // by resolving the query against Yahoo (which upserts the canonical rows).
   useEffect(() => {
     if (!menuOpen) return;
     const q = stockQuery.trim();
-    if (q.length < 1) { setResults([]); return; } // don't show a default list — type to search
+    if (q.length < 1) { setResults([]); setResolving(false); return; } // don't show a default list — type to search
+    let cancelled = false;
     const t = setTimeout(async () => {
       const { data } = await supabase
         .from('securities')
-        .select('id, symbol, name, last_price')
+        .select('id, symbol, name, exchange, last_price')
         .or(`name.ilike.%${q}%,symbol.ilike.%${q}%`)
         .limit(20);
-      setResults(data ?? []);
-    }, 180);
-    return () => clearTimeout(t);
+      if (cancelled) return;
+      if (data && data.length) { setResults(data); setResolving(false); return; }
+      if (q.length < 2) { setResults([]); return; }
+      setResolving(true);
+      const live = await resolveStocksLive(q);
+      if (cancelled) return;
+      setResults(live);
+      setResolving(false);
+    }, 200);
+    return () => { cancelled = true; clearTimeout(t); };
   }, [stockQuery, menuOpen, supabase]);
 
   useEffect(() => setMounted(true), []);
@@ -72,7 +83,7 @@ export default function NewTransactionModal() {
     // Pull the live current price so it prefills (user can still edit).
     setPriceLoading(true);
     try {
-      const res = await fetch(`/api/quote?symbol=${encodeURIComponent(s.symbol)}`);
+      const res = await fetch(`/api/quote?symbol=${encodeURIComponent(s.symbol)}&exchange=${s.exchange ?? 'NSE'}`);
       const j = await res.json();
       if (j.price != null) setPrice(String(j.price));
       else if (s.last_price != null) setPrice(String(s.last_price));
@@ -166,12 +177,12 @@ export default function NewTransactionModal() {
                   />
                   <div className={'combo-menu' + (menuOpen ? ' show' : '')}>
                     {results.length === 0 ? (
-                      <div className="combo-empty">{stockQuery.trim() ? 'No matches — try another name' : 'Start typing a company name'}</div>
+                      <div className="combo-empty">{resolving ? 'Searching live market…' : (stockQuery.trim() ? 'No matches — try another name' : 'Start typing a company name')}</div>
                     ) : results.map((s) => (
                       <div key={s.id} className="combo-item" onMouseDown={() => pick(s)}>
                         <div>
                           <div className="nm">{s.name}</div>
-                          <div className="sub">{s.symbol} · NSE</div>
+                          <div className="sub">{s.symbol} · {s.exchange ?? 'NSE'}</div>
                         </div>
                         {s.last_price != null && <div className="ltp">₹{Number(s.last_price).toLocaleString('en-IN')}</div>}
                       </div>

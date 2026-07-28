@@ -51,9 +51,9 @@ async function recomputeHolding(
 // Best-effort live price refresh so P/L shows immediately (cron catches up otherwise).
 async function refreshSecurityPrice(supabase: Awaited<ReturnType<typeof createClient>>, securityId: number) {
   try {
-    const { data: sec } = await supabase.from('securities').select('symbol').eq('id', securityId).single();
+    const { data: sec } = await supabase.from('securities').select('symbol, exchange').eq('id', securityId).single();
     if (!sec?.symbol) return;
-    const [q] = await getQuotes([sec.symbol]);
+    const [q] = await getQuotes([{ symbol: sec.symbol, exchange: sec.exchange ?? undefined }]);
     if (!q) return;
     const admin = createAdminClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
     await admin
@@ -79,8 +79,10 @@ export async function recordTransaction(input: TxnInput) {
 
   // find-or-create client by phone within this advisor's book
   let clientId: string;
+  // Match by phone within the firm (RLS scopes the read), so a firm-mate's
+  // client isn't duplicated when another advisor records a trade.
   const { data: existing } = await supabase
-    .from('clients').select('id').eq('advisor_id', user.id).eq('phone', input.phone).maybeSingle();
+    .from('clients').select('id').eq('phone', input.phone).maybeSingle();
   if (existing) {
     clientId = existing.id;
   } else {
@@ -162,6 +164,40 @@ export async function updateTransaction(input: {
   revalidatePath('/clients');
   revalidatePath(`/clients/${txn.client_id}`);
   return { ok: true };
+}
+
+// Record a sale of one security across many clients at once (e.g. the advisor
+// exits a model-portfolio position). One Sell per client; holdings recomputed
+// (FIFO books realised P/L, fully-exited positions drop off).
+export async function sellForAllHolders(input: {
+  securityId: number;
+  price: number;
+  date?: string;
+  sells: { clientId: string; quantity: number }[];
+}) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: 'Not signed in.' };
+  if (!input.securityId) return { ok: false, error: 'Missing stock.' };
+  if (!(input.price >= 0)) return { ok: false, error: 'Enter a valid sale price.' };
+
+  const list = (input.sells ?? []).filter((s) => s.clientId && s.quantity > 0);
+  if (!list.length) return { ok: false, error: 'Nothing to sell — set a quantity for at least one client.' };
+
+  const traded = tradedTs(input.date);
+  const rows = list.map((s) => ({
+    client_id: s.clientId, security_id: input.securityId, side: 'Sell' as const,
+    quantity: s.quantity, price: input.price, traded_at: traded, note: 'Bulk sale',
+  }));
+  const { error } = await supabase.from('transactions').insert(rows);
+  if (error) return { ok: false, error: error.message };
+
+  for (const s of list) await recomputeHolding(supabase, s.clientId, input.securityId);
+  await refreshSecurityPrice(supabase, input.securityId);
+
+  revalidatePath('/dashboard'); revalidatePath('/clients'); revalidatePath('/portfolios');
+  for (const s of list) revalidatePath(`/clients/${s.clientId}`);
+  return { ok: true, count: list.length };
 }
 
 export async function deleteTransaction(id: string) {

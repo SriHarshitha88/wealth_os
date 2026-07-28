@@ -52,3 +52,32 @@ export async function getQuotes(inputs: QuoteInput[]): Promise<Quote[]> {
 
   return results.filter((q): q is Quote => q !== null);
 }
+
+export type SearchHit = { symbol: string; name: string; exchange: string };
+
+// Yahoo's search endpoint — resolves a name or ticker to real NSE/BSE equity
+// symbols on demand, for when the local `securities` table has no match. Only
+// equities on NSE (.NS) / BSE (.BO) are returned.
+export async function searchSecurities(query: string): Promise<SearchHit[]> {
+  try {
+    const res = await fetch(
+      `https://query2.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(query)}&quotesCount=10&newsCount=0`,
+      { headers: { 'User-Agent': 'Mozilla/5.0' }, cache: 'no-store' },
+    );
+    const json = await res.json();
+    const hits: SearchHit[] = [];
+    for (const q of json?.quotes ?? []) {
+      if (!q?.symbol || q.quoteType !== 'EQUITY') continue;
+      const m = /\.(NS|BO)$/.exec(q.symbol);
+      if (!m) continue;
+      hits.push({
+        symbol: q.symbol.replace(/\.(NS|BO)$/, ''),
+        name: q.longname || q.shortname || q.symbol,
+        exchange: m[1] === 'BO' ? 'BSE' : 'NSE',
+      });
+    }
+    return hits;
+  } catch {
+    return [];
+  }
+}
