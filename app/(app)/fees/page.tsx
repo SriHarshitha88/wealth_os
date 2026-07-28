@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { cr } from '@/lib/format';
-import { computeFee, deriveState, BAND_STEP } from '@/lib/fee-schedule';
+import { computeFee, deriveState } from '@/lib/fee-schedule';
 import FeeEngine, { type FeeRow } from '@/components/FeeEngine';
 
 export const dynamic = 'force-dynamic';
@@ -69,7 +69,6 @@ export default async function FeesPage() {
         <div>
           <div className="eyebrow">Fee Engine · Appreciation slabs</div>
           <h1>Performance fees</h1>
-          <p>Each {BAND_STEP}% of appreciation over a client’s invested capital is billed once, at a rising rate — 5% → 10% → 12.5% → 15% → 25%, then 25% flat above +100%. Click a client for the full milestone history.</p>
         </div>
       </div>
 
