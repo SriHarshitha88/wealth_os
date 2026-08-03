@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
-import { cr, inr, pct } from '@/lib/format';
+import { cr, pct } from '@/lib/format';
 import { privacyOn, maskIf } from '@/lib/privacy';
+import AllHoldingsTable from '@/components/AllHoldingsTable';
 
 export const dynamic = 'force-dynamic';
 
@@ -74,40 +75,7 @@ export default async function PortfoliosPage() {
             <p style={{ color: 'var(--ink-3)', margin: 0 }}>Record a Buy from “New transaction” to see positions here.</p>
           </div>
         ) : (
-          <div className="twrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Stock</th><th style={{ textAlign: 'left' }}>Client</th><th>Qty</th>
-                  <th>Invested price</th><th>Current price</th>
-                  <th>Invested</th><th>Current</th><th>P/L</th><th>Return</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r, i) => (
-                  <tr key={i}>
-                    <td>
-                      <div className="cell-name">
-                        <div className="avatar" style={{ borderRadius: 8, fontSize: 11 }}>{r.symbol.slice(0, 4)}</div>
-                        <div>
-                          <div style={{ fontWeight: 600 }}>{r.symbol}</div>
-                          <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>{r.name}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td style={{ textAlign: 'left' }}>{r.client}</td>
-                    <td>{r.qty.toLocaleString('en-IN')}</td>
-                    <td>{inr(r.avg)}</td>
-                    <td>{r.cur != null ? inr(r.cur) : '—'}</td>
-                    <td>{cr(r.investedValue)}</td>
-                    <td>{r.currentValue != null ? cr(r.currentValue) : '—'}</td>
-                    <td className={r.pl == null ? '' : r.pl >= 0 ? 'num-pos' : 'num-neg'}>{r.pl != null ? cr(r.pl) : '—'}</td>
-                    <td className={r.ret == null ? '' : r.ret >= 0 ? 'num-pos' : 'num-neg'}>{r.ret != null ? pct(r.ret) : '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <AllHoldingsTable rows={rows} />
         )}
       </div>
     </>

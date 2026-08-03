@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { deleteClients } from '@/app/actions/clients';
 import { cr, pct } from '@/lib/format';
+import { useSort, SortTh } from '@/lib/use-sort';
 
 type Row = {
   id: string; name: string; phone: string; tier: string;
@@ -16,6 +17,7 @@ export default function ClientsTable({ rows }: { rows: Row[] }) {
   const router = useRouter();
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  const sort = useSort(rows, 'current', 'desc');
 
   const allChecked = rows.length > 0 && sel.size === rows.length;
   const toggle = (id: string) =>
@@ -49,18 +51,18 @@ export default function ClientsTable({ rows }: { rows: Row[] }) {
             <thead>
               <tr>
                 <th style={{ width: 40 }}><input type="checkbox" aria-label="Select all" checked={allChecked} onChange={toggleAll} /></th>
-                <th style={{ textAlign: 'left' }}>Client</th>
+                <SortTh label="Client" k="name" sort={sort} type="text" left />
                 <th style={{ textAlign: 'left' }}>Phone</th>
-                <th style={{ textAlign: 'left' }}>Tier</th>
-                <th>Invested</th>
-                <th>Current value</th>
-                <th>Gain / Loss</th>
-                <th>% G/L</th>
+                <SortTh label="Tier" k="tier" sort={sort} type="text" left />
+                <SortTh label="Invested" k="invested" sort={sort} />
+                <SortTh label="Current value" k="current" sort={sort} />
+                <SortTh label="Gain / Loss" k="pl" sort={sort} />
+                <SortTh label="% G/L" k="plPct" sort={sort} />
                 <th style={{ textAlign: 'left' }}>Report</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((c) => (
+              {sort.sorted.map((c) => (
                 <tr key={c.id}>
                   <td><input type="checkbox" aria-label={`Select ${c.name}`} checked={sel.has(c.id)} onChange={() => toggle(c.id)} /></td>
                   <td>

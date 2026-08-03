@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import { addTransaction, updateTransaction } from '@/app/actions/transactions';
 import { resolveStocksLive } from '@/lib/stock-search';
 import { cr, inr, pct } from '@/lib/format';
+import { useSort, SortTh } from '@/lib/use-sort';
 
 export type HoldingRow = {
   securityId: number;
@@ -27,6 +28,7 @@ export default function ClientHoldings({ clientId, rows }: { clientId: string; r
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const sort = useSort(rows, 'current', 'desc');
 
   // inline edit of a holding (its single backing Buy: quantity + average cost)
   const [editId, setEditId] = useState<string | null>(null);
@@ -189,12 +191,22 @@ export default function ClientHoldings({ clientId, rows }: { clientId: string; r
           <table>
             <thead>
               <tr>
-                <th>Stock</th><th>Qty</th><th>Avg cost</th><th>Since</th><th>Current price</th>
-                <th>Invested</th><th>Current</th><th>Unrealized P/L</th><th>Return</th><th>XIRR</th><th>Realized</th><th></th>
+                <SortTh label="Stock" k="symbol" sort={sort} type="text" left />
+                <SortTh label="Qty" k="qty" sort={sort} />
+                <SortTh label="Avg cost" k="avg" sort={sort} />
+                <SortTh label="Since" k="firstBuyDate" sort={sort} type="date" />
+                <SortTh label="Current price" k="cur" sort={sort} />
+                <SortTh label="Invested" k="invested" sort={sort} />
+                <SortTh label="Current" k="current" sort={sort} />
+                <SortTh label="Unrealized P/L" k="pl" sort={sort} />
+                <SortTh label="Return" k="ret" sort={sort} />
+                <SortTh label="XIRR" k="xirr" sort={sort} />
+                <SortTh label="Realized" k="realised" sort={sort} />
+                <th></th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => editId && r.singleBuyId === editId ? (
+              {sort.sorted.map((r) => editId && r.singleBuyId === editId ? (
                 <tr key={r.securityId}>
                   <td>
                     <div className="cell-name">

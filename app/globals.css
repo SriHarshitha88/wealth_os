@@ -185,6 +185,31 @@ table { border-collapse:collapse; width:100%; font-size:15px; }
 thead th { text-align:right; font-size:12px; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-4); font-weight:600;
   padding:13px 16px; border-bottom:1px solid var(--line); white-space:nowrap; background:var(--surface-2); }
 thead th:first-child, tbody td:first-child { text-align:left; }
+thead th.sort-th { padding:0; }
+.sort-btn { display:flex; align-items:center; gap:5px; width:100%; background:none; border:0; cursor:pointer;
+  color:inherit; font:inherit; letter-spacing:inherit; text-transform:inherit; padding:13px 16px; white-space:nowrap; transition:color .12s ease; }
+.sort-btn:hover { color:var(--ink-2); }
+.sort-btn.on { color:var(--ink-2); }
+.sort-ar { font-size:9.5px; opacity:.55; }
+.sort-btn.on .sort-ar { opacity:1; color:var(--brand); }
+.sort-btn:not(.on):hover .sort-ar { opacity:.8; }
+.sort-scrim { position:fixed; inset:0; z-index:200; }
+.sort-menu { min-width:176px; background:var(--surface); border:1px solid var(--line); border-radius:12px; box-shadow:var(--shadow-lg); padding:5px; }
+.sort-opt { display:flex; align-items:center; gap:8px; width:100%; text-align:left; background:none; border:0; padding:8px 11px;
+  border-radius:8px; font-size:13px; font-weight:500; color:var(--ink-2); cursor:pointer; letter-spacing:normal; text-transform:none; }
+.sort-opt:hover { background:var(--surface-2); }
+.sort-opt.on { color:var(--brand); }
+.sort-opt .ck { margin-left:auto; color:var(--brand); }
+.sort-sep { height:1px; background:var(--line-soft); margin:5px 6px; }
+.sort-menu.wide { min-width:212px; }
+.sort-funnel { margin-left:3px; color:var(--brand); }
+.filt-label { font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-4); font-weight:600; padding:4px 11px 4px; }
+.filt-row { display:flex; gap:6px; padding:2px 8px; }
+.filt-sel, .filt-in { width:100%; min-width:0; border:1px solid var(--line); background:var(--surface-2); border-radius:8px;
+  padding:7px 9px; font-size:12.5px; color:var(--ink); font-family:inherit; outline:none; }
+.filt-sel:focus, .filt-in:focus { border-color:var(--brand); }
+.filt-actions { display:flex; gap:6px; padding:9px 8px 5px; }
+.filt-actions .btn { flex:1; justify-content:center; padding:7px 10px; font-size:12.5px; }
 tbody td { padding:15px 16px; border-bottom:1px solid var(--line-soft); text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; }
 tbody tr:hover { background:var(--surface-2); }
 tbody tr:last-child td { border-bottom:0; }

@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { cr, inr } from '@/lib/format';
+import { cr } from '@/lib/format';
 import { fyLabelOf, currentFY, type CGBucket } from '@/lib/capital-gains';
+import { useSort, SortTh } from '@/lib/use-sort';
 
 export type GainSlice = {
   symbol: string; name: string; buyDate: string; sellDate: string; qty: number;
@@ -20,7 +21,8 @@ export default function CapitalGains({
   const options = fyList.length ? fyList : [currentFY()];
   const [fy, setFy] = useState(options[0]);
 
-  const inFy = slices.filter((s) => fyLabelOf(s.sellDate) === fy).sort((a, b) => new Date(b.sellDate).getTime() - new Date(a.sellDate).getTime());
+  const inFy = slices.filter((s) => fyLabelOf(s.sellDate) === fy);
+  const sort = useSort(inFy, 'sellDate', 'desc');
   const st = empty(), lt = empty();
   for (const s of inFy) { const b = s.longTerm ? lt : st; b.count++; b.qty += s.qty; b.proceeds += s.proceeds; b.cost += s.cost; b.gain += s.gain; }
 
@@ -51,10 +53,20 @@ export default function CapitalGains({
           <div className="twrap" style={{ marginBottom: 8 }}>
             <table>
               <thead>
-                <tr><th>Stock</th><th>Bought</th><th>Sold</th><th>Days</th><th>Qty</th><th>Buy value</th><th>Sell value</th><th>Gain / (Loss)</th><th>Type</th></tr>
+                <tr>
+                  <SortTh label="Stock" k="symbol" sort={sort} type="text" left />
+                  <SortTh label="Bought" k="buyDate" sort={sort} type="date" left />
+                  <SortTh label="Sold" k="sellDate" sort={sort} type="date" left />
+                  <SortTh label="Days" k="holdingDays" sort={sort} />
+                  <SortTh label="Qty" k="qty" sort={sort} />
+                  <SortTh label="Buy value" k="cost" sort={sort} />
+                  <SortTh label="Sell value" k="proceeds" sort={sort} />
+                  <SortTh label="Gain / (Loss)" k="gain" sort={sort} />
+                  <SortTh label="Type" k="longTerm" sort={sort} type="text" />
+                </tr>
               </thead>
               <tbody>
-                {inFy.map((s, i) => (
+                {sort.sorted.map((s, i) => (
                   <tr key={i}>
                     <td><span style={{ fontWeight: 600 }}>{s.symbol}</span></td>
                     <td style={{ color: 'var(--ink-3)', fontSize: 12.5 }}>{fmtD(s.buyDate)}</td>

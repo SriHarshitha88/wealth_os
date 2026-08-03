@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { cr, inr, pct } from '@/lib/format';
 import { sellForAllHolders } from '@/app/actions/transactions';
+import { useSort, SortTh } from '@/lib/use-sort';
 
 export type Lot = { date: string | null; side: string; qty: number; price: number };
 export type HolderRow = {
@@ -22,6 +23,7 @@ export default function StockHolders({
   security, rows,
 }: { security: { id: number; symbol: string; lastPrice: number | null }; rows: HolderRow[] }) {
   const router = useRouter();
+  const sort = useSort(rows, 'current', 'desc');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [sellOpen, setSellOpen] = useState(false);
   const [price, setPrice] = useState(security.lastPrice != null ? String(security.lastPrice) : '');
@@ -72,10 +74,21 @@ export default function StockHolders({
         <div className="twrap">
           <table>
             <thead>
-              <tr><th></th><th>Client</th><th>Qty</th><th>Buy price</th><th>Bought</th><th>Current</th><th>Invested</th><th>Value</th><th>P/L</th><th>Return</th></tr>
+              <tr>
+                <th></th>
+                <SortTh label="Client" k="client" sort={sort} type="text" left />
+                <SortTh label="Qty" k="qty" sort={sort} />
+                <SortTh label="Buy price" k="avg" sort={sort} />
+                <SortTh label="Bought" k="firstBuyDate" sort={sort} type="date" />
+                <th>Current</th>
+                <SortTh label="Invested" k="invested" sort={sort} />
+                <SortTh label="Value" k="current" sort={sort} />
+                <SortTh label="P/L" k="pl" sort={sort} />
+                <SortTh label="Return" k="ret" sort={sort} />
+              </tr>
             </thead>
             <tbody>
-              {rows.map((r, i) => {
+              {sort.sorted.map((r, i) => {
                 const key = r.clientId ?? `row-${i}`;
                 const open = !!expanded[key];
                 const multi = r.lots.filter((l) => l.side !== 'Sell').length > 1 || r.lots.some((l) => l.side === 'Sell');
