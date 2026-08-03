@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { inr } from '@/lib/format';
 import { computePosition } from '@/lib/portfolio-calc';
+import { privacyOn, maskIf } from '@/lib/privacy';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import StockHolders, { type HolderRow } from '@/components/StockHolders';
@@ -16,6 +17,7 @@ export default async function StockPage({ params }: { params: Promise<{ symbol: 
   const { symbol } = await params;
   const sym = decodeURIComponent(symbol);
   const supabase = await createClient();
+  const privacy = await privacyOn();
 
   const { data: sec } = await supabase
     .from('securities').select('id, symbol, name, exchange, last_price').eq('symbol', sym).maybeSingle();
@@ -51,7 +53,7 @@ export default async function StockPage({ params }: { params: Promise<{ symbol: 
     const current = cur != null ? pos.qty * cur : null;
     const pl = current != null ? current - invested : null;
     rows.push({
-      clientId, client: name, qty: pos.qty, avg: pos.avgCost, invested,
+      clientId, client: maskIf(name, privacy), qty: pos.qty, avg: pos.avgCost, invested,
       current, pl, ret: pl != null && invested ? (pl / invested) * 100 : null,
       firstBuyDate: firstBuy, lots,
     });

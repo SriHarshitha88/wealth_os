@@ -13,8 +13,12 @@ export type HoldingRow = {
   symbol: string; name: string;
   qty: number; avg: number; cur: number | null;
   invested: number; current: number | null; pl: number | null; ret: number | null; realised: number;
+  firstBuyDate: string | null; xirr: number | null; daysToLTCG: number | null;
   closed: boolean;
 };
+
+const fmtD = (d: string | null) =>
+  d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit', timeZone: 'Asia/Kolkata' }) : '—';
 type Security = { id: number; symbol: string; name: string; exchange?: string; last_price: number | null };
 
 export default function ClientHoldings({ clientId, rows }: { clientId: string; rows: HoldingRow[] }) {
@@ -185,8 +189,8 @@ export default function ClientHoldings({ clientId, rows }: { clientId: string; r
           <table>
             <thead>
               <tr>
-                <th>Stock</th><th>Qty</th><th>Avg cost</th><th>Current price</th>
-                <th>Invested</th><th>Current</th><th>Unrealized P/L</th><th>Return</th><th>Realized</th><th></th>
+                <th>Stock</th><th>Qty</th><th>Avg cost</th><th>Since</th><th>Current price</th>
+                <th>Invested</th><th>Current</th><th>Unrealized P/L</th><th>Return</th><th>XIRR</th><th>Realized</th><th></th>
               </tr>
             </thead>
             <tbody>
@@ -203,9 +207,10 @@ export default function ClientHoldings({ clientId, rows }: { clientId: string; r
                   </td>
                   <td><input inputMode="numeric" value={eQty} onChange={(e) => setEQty(e.target.value.replace(/[^0-9.]/g, ''))} style={{ width: 80, padding: '7px 9px', textAlign: 'right' }} /></td>
                   <td><input inputMode="decimal" value={ePrice} onChange={(e) => setEPrice(e.target.value.replace(/[^0-9.]/g, ''))} style={{ width: 90, padding: '7px 9px', textAlign: 'right' }} /></td>
+                  <td style={{ color: 'var(--ink-3)' }}>—</td>
                   <td>{r.cur != null ? inr(r.cur) : '—'}</td>
                   <td>{cr((parseFloat(eQty) || 0) * (parseFloat(ePrice) || 0))}</td>
-                  <td colSpan={3} style={{ color: 'var(--ink-3)', fontSize: 12 }}>Recalculates on save</td>
+                  <td colSpan={5} style={{ color: 'var(--ink-3)', fontSize: 12 }}>Recalculates on save</td>
                   <td style={{ whiteSpace: 'nowrap' }}>
                     <button className="btn primary" style={{ padding: '6px 10px' }} onClick={() => saveEdit(editId)} disabled={busy}>Save</button>{' '}
                     <button className="btn" style={{ padding: '6px 10px' }} onClick={() => setEditId(null)}>Cancel</button>
@@ -224,11 +229,16 @@ export default function ClientHoldings({ clientId, rows }: { clientId: string; r
                   </td>
                   <td>{!r.closed ? r.qty.toLocaleString('en-IN') : '—'}</td>
                   <td>{!r.closed ? inr(r.avg) : '—'}</td>
+                  <td style={{ fontSize: 12.5, color: 'var(--ink-3)', whiteSpace: 'nowrap' }}>
+                    {!r.closed ? fmtD(r.firstBuyDate) : '—'}
+                    {!r.closed && r.daysToLTCG != null && r.daysToLTCG > 0 && <div style={{ fontSize: 11, color: 'var(--ink-4)' }}>LT in {r.daysToLTCG}d</div>}
+                  </td>
                   <td>{r.cur != null ? inr(r.cur) : '—'}</td>
                   <td>{!r.closed ? cr(r.invested) : '—'}</td>
                   <td>{r.current != null ? cr(r.current) : '—'}</td>
                   <td className={r.pl == null ? '' : r.pl >= 0 ? 'num-pos' : 'num-neg'}>{r.pl != null ? cr(r.pl) : '—'}</td>
                   <td className={r.ret == null ? '' : r.ret >= 0 ? 'num-pos' : 'num-neg'}>{r.ret != null ? pct(r.ret) : '—'}</td>
+                  <td className={r.xirr == null ? '' : r.xirr >= 0 ? 'num-pos' : 'num-neg'}>{r.xirr != null ? pct(r.xirr) : '—'}</td>
                   <td className={Math.abs(r.realised) < 0.005 ? '' : r.realised >= 0 ? 'num-pos' : 'num-neg'}>{Math.abs(r.realised) < 0.005 ? '—' : cr(r.realised)}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>
                     {r.closed ? null : r.singleBuyId ? (

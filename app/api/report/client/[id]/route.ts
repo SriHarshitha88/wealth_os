@@ -4,7 +4,8 @@ import { createElement } from 'react';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createClient } from '@/lib/supabase/server';
-import { computePosition } from '@/lib/portfolio-calc';
+import { computeLots } from '@/lib/portfolio-calc';
+import { xirr, positionCashflows } from '@/lib/xirr';
 import ClientReportPdf, { type ReportRow } from '@/components/ClientReportPdf';
 
 // Load the Ashesha lockup once and cache it as a data URI for the PDF header.
@@ -47,8 +48,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     bySec.set(t.security_id, e);
   }
 
+  const nowIso = new Date().toISOString();
   const positions: ReportRow[] = [...bySec.values()].map(({ sec, txns }) => {
-    const pos = computePosition(txns);
+    const pos = computeLots(txns);
     const cur = sec?.last_price != null ? Number(sec.last_price) : null;
     const currentValue = cur != null && pos.qty > 1e-9 ? pos.qty * cur : null;
     const pl = currentValue != null ? currentValue - pos.invested : null;
@@ -57,6 +59,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       symbol: sec?.symbol ?? '-', name: sec?.name ?? '', sector: sec?.sector ?? null,
       qty: pos.qty, avg: pos.avgCost, cur,
       investedValue: pos.invested, currentValue, pl, ret, realised: pos.realised,
+      firstBuyDate: pos.firstBuyDate, xirr: xirr(positionCashflows(txns, pos.qty, cur, nowIso)),
     };
   });
 

@@ -1,0 +1,6 @@
+->first transaction date
+->mask client name
+->separate pdf
+->xirr calculation:, now we have absolute return only want a separate xirr column,
+->plus in the pdf, sold should be separate everything is same
+->short term capital gains, long term capital gain( currently absolute coming, particular stock how msny mnths like 12 months, more than 365 days less than 365 days holding:clieent portfolio, as part of client report in capital gain 

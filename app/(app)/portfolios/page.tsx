@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { cr, inr, pct } from '@/lib/format';
+import { privacyOn, maskIf } from '@/lib/privacy';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,6 +10,7 @@ function rel(x: any) {
 
 export default async function PortfoliosPage() {
   const supabase = await createClient();
+  const privacy = await privacyOn();
 
   const { data: holdings } = await supabase
     .from('holdings')
@@ -24,7 +26,7 @@ export default async function PortfoliosPage() {
     const currentValue = cur != null ? qty * cur : null;
     const pl = currentValue != null ? currentValue - investedValue : null;
     const ret = pl != null && investedValue ? (pl / investedValue) * 100 : null;
-    return { client: cl?.name ?? '—', symbol: sec?.symbol ?? '—', name: sec?.name ?? '', qty, avg, cur, investedValue, currentValue, pl, ret };
+    return { client: cl?.name ? maskIf(cl.name, privacy) : '—', symbol: sec?.symbol ?? '—', name: sec?.name ?? '', qty, avg, cur, investedValue, currentValue, pl, ret };
   }).sort((a, b) => (b.currentValue ?? 0) - (a.currentValue ?? 0));
 
   const invested = rows.reduce((a, r) => a + r.investedValue, 0);

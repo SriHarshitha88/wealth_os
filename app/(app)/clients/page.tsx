@@ -1,11 +1,13 @@
 import { createClient } from '@/lib/supabase/server';
 import ClientsTable from '@/components/ClientsTable';
 import ImportPortfolioModal from '@/components/ImportPortfolioModal';
+import { privacyOn, maskIf } from '@/lib/privacy';
 
 export const dynamic = 'force-dynamic';
 
 export default async function ClientsPage() {
   const supabase = await createClient();
+  const privacy = await privacyOn();
   const [{ data: clients }, { data: vals }] = await Promise.all([
     supabase.from('clients').select('id, name, phone, tier').order('created_at', { ascending: false }),
     supabase.from('client_valuation').select('client_id, invested_value, current_value, unrealized_pl'),
@@ -18,7 +20,7 @@ export default async function ClientsPage() {
     const current = Number(v?.current_value ?? 0);
     const pl = Number(v?.unrealized_pl ?? 0);
     const plPct = invested ? (pl / invested) * 100 : 0;
-    return { ...c, invested, current, pl, plPct };
+    return { ...c, name: maskIf(c.name, privacy), invested, current, pl, plPct };
   });
 
   return (

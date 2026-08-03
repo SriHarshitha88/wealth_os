@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { cr } from '@/lib/format';
 import { computeFee, deriveState } from '@/lib/fee-schedule';
+import { privacyOn, maskIf } from '@/lib/privacy';
 import FeeEngine, { type FeeRow } from '@/components/FeeEngine';
 
 export const dynamic = 'force-dynamic';
@@ -11,6 +12,7 @@ function rel(x: any) {
 
 export default async function FeesPage() {
   const supabase = await createClient();
+  const privacy = await privacyOn();
 
   const [{ data: clients }, { data: holdings }, { data: marks }, { data: fees }] = await Promise.all([
     supabase.from('clients').select('id, name'),
@@ -50,7 +52,7 @@ export default async function FeesPage() {
     const collectedTotal = collected.reduce((a, f) => a + f.amount, 0);
 
     return {
-      id: c.id, name: c.name, invested,
+      id: c.id, name: maskIf(c.name, privacy), invested,
       capital: calc.capital, current: calc.current, gainPct: calc.gainPct,
       reachedBands: calc.reachedBands, chargedBands: calc.chargedBands, reachedPct: calc.reachedPct,
       nextMilestonePct: calc.nextMilestonePct, nextMilestoneValue: calc.nextMilestoneValue,

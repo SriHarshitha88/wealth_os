@@ -3,11 +3,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import { maskIf } from '@/lib/mask';
 
 type ClientHit = { id: string; name: string };
 type StockHit = { symbol: string; name: string };
 
-export default function TopSearch() {
+export default function TopSearch({ privacy = false }: { privacy?: boolean }) {
   const supabase = createClient();
   const router = useRouter();
   const [q, setQ] = useState('');
@@ -64,7 +65,7 @@ export default function TopSearch() {
               {clients.map((c) => (
                 <button key={c.id} className="search-item" onClick={() => go(`/clients/${c.id}`)}>
                   <div className="avatar" style={{ width: 28, height: 28, fontSize: 11 }}>{c.name.slice(0, 2).toUpperCase()}</div>
-                  <span style={{ fontWeight: 600 }}>{c.name}</span>
+                  <span style={{ fontWeight: 600 }}>{maskIf(c.name, privacy)}</span>
                 </button>
               ))}
             </>

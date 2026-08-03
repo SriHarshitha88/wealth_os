@@ -7,7 +7,7 @@ import { addTransaction, updateTransaction, deleteTransaction } from '@/app/acti
 import { resolveStocksLive } from '@/lib/stock-search';
 import { inr } from '@/lib/format';
 
-type Trade = { id: string; side: string; symbol: string; name: string; qty: number; price: number; tradedAt: string };
+export type Trade = { id: string; side: string; symbol: string; name: string; qty: number; price: number; tradedAt: string };
 type Security = { id: number; symbol: string; name: string; exchange?: string; last_price: number | null };
 
 const IST = 'Asia/Kolkata';

@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { cr, inr, pct } from '@/lib/format';
+import { privacyOn, maskIf } from '@/lib/privacy';
 import Link from 'next/link';
 import PriceTicker from '@/components/PriceTicker';
 
@@ -18,6 +19,7 @@ function rel(sec: any) {
 
 export default async function DashboardPage() {
   const supabase = await createClient();
+  const privacy = await privacyOn();
 
   const [{ data: holdings }, { count: clientCount }, { data: fees }, { data: txns }] = await Promise.all([
     supabase.from('holdings').select('quantity, avg_price, securities(symbol, name, last_price, prev_close)'),
@@ -205,7 +207,7 @@ export default async function DashboardPage() {
                           </div>
                           <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>{Number(t.quantity).toLocaleString('en-IN')} @ {inr(Number(t.price))}</div>
                         </td>
-                        <td style={{ textAlign: 'left' }}>{cl?.name ?? '—'}</td>
+                        <td style={{ textAlign: 'left' }}>{cl?.name ? maskIf(cl.name, privacy) : '—'}</td>
                         <td>{cr(Number(t.quantity) * Number(t.price))}</td>
                       </tr>
                     );
