@@ -6,6 +6,17 @@ import { getQuotes } from '@/lib/marketdata';
 import { computePosition } from '@/lib/portfolio-calc';
 import { revalidatePath } from 'next/cache';
 
+// Any trade changes holdings, so every view that reads them must be revalidated —
+// including /fees and /portfolios (previously missed, so fees looked stale).
+function revalidateBook(clientId?: string) {
+  revalidatePath('/dashboard');
+  revalidatePath('/clients');
+  revalidatePath('/portfolios');
+  revalidatePath('/fees');
+  revalidatePath('/stocks/[symbol]', 'page');
+  if (clientId) revalidatePath(`/clients/${clientId}`);
+}
+
 export type TxnInput = {
   clientName: string;
   phone: string;
@@ -107,9 +118,7 @@ export async function recordTransaction(input: TxnInput) {
   await recomputeHolding(supabase, clientId, input.securityId);
   await refreshSecurityPrice(supabase, input.securityId);
 
-  revalidatePath('/dashboard');
-  revalidatePath('/clients');
-  revalidatePath(`/clients/${clientId}`);
+  revalidateBook(clientId);
   return { ok: true };
 }
 
@@ -135,9 +144,7 @@ export async function addTransaction(input: {
 
   await recomputeHolding(supabase, input.clientId, input.securityId);
   await refreshSecurityPrice(supabase, input.securityId);
-  revalidatePath('/dashboard');
-  revalidatePath('/clients');
-  revalidatePath(`/clients/${input.clientId}`);
+  revalidateBook(input.clientId);
   return { ok: true };
 }
 
@@ -160,9 +167,7 @@ export async function updateTransaction(input: {
   if (error) return { ok: false, error: error.message };
 
   await recomputeHolding(supabase, txn.client_id, txn.security_id);
-  revalidatePath('/dashboard');
-  revalidatePath('/clients');
-  revalidatePath(`/clients/${txn.client_id}`);
+  revalidateBook(txn.client_id);
   return { ok: true };
 }
 
@@ -195,7 +200,7 @@ export async function sellForAllHolders(input: {
   for (const s of list) await recomputeHolding(supabase, s.clientId, input.securityId);
   await refreshSecurityPrice(supabase, input.securityId);
 
-  revalidatePath('/dashboard'); revalidatePath('/clients'); revalidatePath('/portfolios');
+  revalidateBook();
   for (const s of list) revalidatePath(`/clients/${s.clientId}`);
   return { ok: true, count: list.length };
 }
@@ -213,8 +218,6 @@ export async function deleteTransaction(id: string) {
   if (error) return { ok: false, error: error.message };
 
   await recomputeHolding(supabase, txn.client_id, txn.security_id);
-  revalidatePath('/dashboard');
-  revalidatePath('/clients');
-  revalidatePath(`/clients/${txn.client_id}`);
+  revalidateBook(txn.client_id);
   return { ok: true };
 }

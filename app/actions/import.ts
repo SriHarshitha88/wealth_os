@@ -109,6 +109,9 @@ export async function importPortfolio(formData: FormData) {
 
   revalidatePath('/clients');
   revalidatePath('/dashboard');
+  revalidatePath('/portfolios');
+  revalidatePath('/fees');
+  revalidatePath('/stocks/[symbol]', 'page');
   revalidatePath(`/clients/${clientId}`);
   return { ok: true, count: holdUpserts.length, trades: txnRows.length, mode, clientId };
 }
