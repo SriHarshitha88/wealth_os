@@ -84,11 +84,22 @@ export async function importPortfolio(formData: FormData) {
     }];
   });
   if (!txnRows.length) return { ok: false, error: 'Nothing to import after matching securities.' };
-  const { error: tErr } = await supabase.from('transactions').insert(txnRows);
+
+  // Idempotency: skip rows that already exist (re-importing the same file must
+  // not double-count). Match on security + side + qty + price + date.
+  const sig = (t: { security_id: any; side: string; quantity: number; price: number; traded_at: string }) =>
+    `${t.security_id}|${t.side}|${Number(t.quantity)}|${Number(t.price)}|${t.traded_at}`;
+  const { data: existingTx } = await supabase
+    .from('transactions').select('security_id, side, quantity, price, traded_at').eq('client_id', clientId);
+  const seen = new Set((existingTx ?? []).map((t: any) => sig(t)));
+  const newRows = txnRows.filter((t) => !seen.has(sig(t)));
+  if (!newRows.length) return { ok: false, error: 'These transactions are already imported — nothing new to add.' };
+
+  const { error: tErr } = await supabase.from('transactions').insert(newRows);
   if (tErr) return { ok: false, error: `Could not save transactions: ${tErr.message}` };
 
   // 4) recompute holdings for every affected security from the full ledger (FIFO)
-  const secIds = [...new Set(txnRows.map((t) => t.security_id))];
+  const secIds = [...new Set(newRows.map((t) => t.security_id))];
   const { data: allTxns } = await supabase
     .from('transactions').select('security_id, side, quantity, price, traded_at')
     .eq('client_id', clientId).in('security_id', secIds);

@@ -13,5 +13,7 @@ export async function deleteClients(ids: string[]) {
   revalidatePath('/clients');
   revalidatePath('/dashboard');
   revalidatePath('/portfolios');
+  revalidatePath('/fees');
+  revalidatePath('/stocks/[symbol]', 'page');
   return { ok: true };
 }

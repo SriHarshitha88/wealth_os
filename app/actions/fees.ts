@@ -26,8 +26,10 @@ async function currentValue(supabase: any, clientId: string) {
 // Shared context: capital snapshot, how far the ledger says we've billed, and the calc.
 async function feeContext(supabase: any, clientId: string) {
   const { current, invested } = await currentValue(supabase, clientId);
-  const { data: mark } = await supabase.from('fee_marks').select('last_basis').eq('client_id', clientId).maybeSingle();
-  const capital = mark && Number(mark.last_basis) > 0 ? Number(mark.last_basis) : invested;
+  // Capital = net invested (tracks deposits/withdrawals) — NOT a frozen snapshot,
+  // so new principal isn't mistaken for appreciation. Billed bands come from the
+  // fee ledger, so re-billing is still prevented.
+  const capital = invested;
   const { data: feeRows } = await supabase.from('fees').select('invoice_no, amount, status').eq('client_id', clientId);
   const { chargedBands, aboveSettled } = deriveState(feeRows ?? [], capital);
   const calc = computeFee({ capital, current, chargedBands, aboveSettled });

@@ -14,14 +14,12 @@ export default async function FeesPage() {
   const supabase = await createClient();
   const privacy = await privacyOn();
 
-  const [{ data: clients }, { data: holdings }, { data: marks }, { data: fees }] = await Promise.all([
+  const [{ data: clients }, { data: holdings }, { data: fees }] = await Promise.all([
     supabase.from('clients').select('id, name'),
     supabase.from('holdings').select('client_id, quantity, avg_price, securities(last_price)'),
-    supabase.from('fee_marks').select('client_id, last_basis'),
     supabase.from('fees').select('client_id, amount, status, invoice_no, paid_at, due_date'),
   ]);
 
-  const markBy = new Map((marks ?? []).map((m) => [m.client_id, m]));
   const feesBy = new Map<string, typeof fees>();
   for (const f of fees ?? []) {
     const arr = feesBy.get(f.client_id) ?? [];
@@ -36,8 +34,7 @@ export default async function FeesPage() {
       invested += Number(h.quantity) * Number(h.avg_price);
       if (sec?.last_price != null) current += Number(h.quantity) * Number(sec.last_price);
     }
-    const m = markBy.get(c.id) as any;
-    const capital = m && Number(m.last_basis) > 0 ? Number(m.last_basis) : invested;
+    const capital = invested; // net invested (tracks deposits) — not a frozen snapshot
     const clientFees = feesBy.get(c.id) ?? [];
     const { chargedBands, aboveSettled } = deriveState(clientFees, capital);
     const calc = computeFee({ capital, current, chargedBands, aboveSettled });
@@ -74,7 +71,7 @@ export default async function FeesPage() {
         </div>
       </div>
 
-      <div className="kpis">
+      <div className="kpis kpis-3">
         <div className="kpi feature">
           <div className="eyebrow">Fee due now</div>
           <div className="val">{cr(totalDue)}</div>

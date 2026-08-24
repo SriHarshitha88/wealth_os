@@ -4,6 +4,7 @@ import { geminiGenerate } from '@/lib/gemini';
 import { getQuotes } from '@/lib/marketdata';
 import { computeFee, deriveState } from '@/lib/fee-schedule';
 import { fetchResultsOn } from '@/lib/nse-results';
+import { privacyOn, maskIf } from '@/lib/privacy';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -50,7 +51,7 @@ async function yahoo(sym: string) {
   return m?.regularMarketPrice != null ? { price: Number(m.regularMarketPrice), prevClose: Number(m.chartPreviousClose ?? m.previousClose ?? m.regularMarketPrice) } : null;
 }
 
-async function dispatch(supabase: any, name: string, args: any) {
+async function dispatch(supabase: any, name: string, args: any, privacy: boolean) {
   switch (name) {
     case 'book_summary': {
       const rows = await valueRows(supabase);
@@ -65,7 +66,7 @@ async function dispatch(supabase: any, name: string, args: any) {
       return (cl ?? []).map((c: any) => {
         let cur = 0, inv = 0;
         for (const h of rows) { if (h.client_id !== c.id) continue; const s = rel(h.securities); inv += h.quantity * h.avg_price; if (s?.last_price != null) cur += h.quantity * s.last_price; }
-        return { client: c.name, current_value: r2(cur), invested: r2(inv), pl: r2(cur - inv), return_pct: inv ? r2((cur - inv) / inv * 100) : 0 };
+        return { client: maskIf(c.name, privacy), current_value: r2(cur), invested: r2(inv), pl: r2(cur - inv), return_pct: inv ? r2((cur - inv) / inv * 100) : 0 };
       });
     }
     case 'who_holds': {
@@ -80,7 +81,7 @@ async function dispatch(supabase: any, name: string, args: any) {
         holders: (hold ?? []).map((h: any) => {
           const s: any = byId.get(h.security_id);
           const cur = s?.last_price != null ? h.quantity * s.last_price : null;
-          return { stock: s?.symbol, client: rel(h.clients)?.name, quantity: h.quantity, avg_price: r2(h.avg_price), current_price: s?.last_price ?? null, pl: cur != null ? r2(cur - h.quantity * h.avg_price) : null };
+          return { stock: s?.symbol, client: maskIf(rel(h.clients)?.name ?? '', privacy), quantity: h.quantity, avg_price: r2(h.avg_price), current_price: s?.last_price ?? null, pl: cur != null ? r2(cur - h.quantity * h.avg_price) : null };
         }),
       };
     }
@@ -94,25 +95,22 @@ async function dispatch(supabase: any, name: string, args: any) {
         inv += i1; if (c1 != null) cur += c1;
         return { stock: s?.symbol, quantity: h.quantity, invested_price: r2(h.avg_price), current_price: s?.last_price ?? null, pl: c1 != null ? r2(c1 - i1) : null };
       });
-      return { client: c.name, current_value: r2(cur), invested: r2(inv), pl: r2(cur - inv), holdings };
+      return { client: maskIf(c.name, privacy), current_value: r2(cur), invested: r2(inv), pl: r2(cur - inv), holdings };
     }
     case 'fee_status': {
       const { data: cl } = await supabase.from('clients').select('id, name');
       const rows = await valueRows(supabase);
-      const { data: marks } = await supabase.from('fee_marks').select('client_id, last_basis');
       const { data: feeRows } = await supabase.from('fees').select('client_id, amount, status, invoice_no');
-      const markBy = new Map((marks ?? []).map((m: any) => [m.client_id, m]));
       const feesBy = new Map<string, any[]>();
       for (const f of feeRows ?? []) { const a = feesBy.get(f.client_id) ?? []; a.push(f); feesBy.set(f.client_id, a); }
       return (cl ?? []).map((c: any) => {
         let cur = 0, inv = 0;
         for (const h of rows) { if (h.client_id !== c.id) continue; const s = rel(h.securities); inv += h.quantity * h.avg_price; if (s?.last_price != null) cur += h.quantity * s.last_price; }
-        const m: any = markBy.get(c.id);
-        const capital = m && Number(m.last_basis) > 0 ? Number(m.last_basis) : inv;
+        const capital = inv; // net invested (tracks deposits), not a frozen snapshot
         const { chargedBands, aboveSettled } = deriveState(feesBy.get(c.id) ?? [], capital);
         const calc = computeFee({ capital, current: cur, chargedBands, aboveSettled });
         return {
-          client: c.name, capital: r2(capital), current_value: r2(cur),
+          client: maskIf(c.name, privacy), capital: r2(capital), current_value: r2(cur),
           appreciation_pct: r2(calc.gainPct), milestone_reached_pct: calc.reachedPct, milestone_billed_pct: chargedBands * 20,
           next_milestone_pct: calc.nextMilestonePct, next_milestone_value: calc.nextMilestoneValue ? r2(calc.nextMilestoneValue) : null,
           status: calc.feeDue > 0 ? 'Fee due' : cur < capital ? 'Below capital' : 'On track', fee_due: r2(calc.feeDue),
@@ -161,6 +159,7 @@ export async function POST(req: NextRequest) {
     return Response.json({ reply: 'The AI Copilot is not configured yet — add GEMINI_API_KEY to your environment.' });
   }
 
+  const privacy = await privacyOn();
   const { messages } = await req.json();
   const contents: any[] = (messages ?? []).map((m: any) => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.text }] }));
 
@@ -182,7 +181,7 @@ export async function POST(req: NextRequest) {
       contents.push(content);
       const responses = [];
       for (const c of calls) {
-        const result = await dispatch(supabase, c.functionCall.name, c.functionCall.args ?? {});
+        const result = await dispatch(supabase, c.functionCall.name, c.functionCall.args ?? {}, privacy);
         responses.push({ functionResponse: { name: c.functionCall.name, response: { result } } });
       }
       contents.push({ role: 'user', parts: responses });

@@ -69,7 +69,18 @@ export default function Copilot() {
       <div className="chat">
         <div className="chat-body" ref={bodyRef}>
           {messages.length === 0 && (
-            <div className="typing">Ask me anything about your clients, portfolios, fees, or live prices. Every number comes from your own data.</div>
+            <div className="chat-empty">
+              <div className="chat-empty-icon">
+                <svg viewBox="0 0 24 24" fill="none" width="24" height="24">
+                  <path d="M12 3l1.8 4.9L18.7 9.7 13.8 11.5 12 16.4 10.2 11.5 5.3 9.7l4.9-1.8L12 3z" fill="currentColor" />
+                  <circle cx="18" cy="17.5" r="1.4" fill="currentColor" opacity=".6" />
+                </svg>
+              </div>
+              <div style={{ fontFamily: 'var(--serif)', fontSize: 19, color: 'var(--ink-2)' }}>What would you like to know?</div>
+              <p style={{ maxWidth: '40ch', margin: 0, fontSize: 13.5, lineHeight: 1.5, color: 'var(--ink-3)' }}>
+                Ask about any client, portfolio, fee, or live price — every number comes straight from your own book. Pick a starter on the right, or type below.
+              </p>
+            </div>
           )}
           {messages.map((m, i) =>
             m.role === 'user'

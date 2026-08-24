@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { cr, inr, pct } from '@/lib/format';
 import { privacyOn, maskIf } from '@/lib/privacy';
+import { computeFee, deriveState } from '@/lib/fee-schedule';
 import Link from 'next/link';
 import PriceTicker from '@/components/PriceTicker';
 
@@ -22,9 +23,9 @@ export default async function DashboardPage() {
   const privacy = await privacyOn();
 
   const [{ data: holdings }, { count: clientCount }, { data: fees }, { data: txns }] = await Promise.all([
-    supabase.from('holdings').select('quantity, avg_price, securities(symbol, name, last_price, prev_close)'),
+    supabase.from('holdings').select('client_id, quantity, avg_price, securities(symbol, name, last_price, prev_close)'),
     supabase.from('clients').select('id', { count: 'exact', head: true }),
-    supabase.from('fees').select('amount, status').in('status', ['Pending', 'Overdue']),
+    supabase.from('fees').select('client_id, amount, status, invoice_no'),
     supabase
       .from('transactions')
       .select('id, side, quantity, price, traded_at, clients(name), securities(symbol)')
@@ -35,6 +36,7 @@ export default async function DashboardPage() {
   let current = 0;
   let invested = 0;
   const bySec = new Map<string, { symbol: string; name: string; invested: number; current: number; hasPrice: boolean }>();
+  const byClient = new Map<string, { invested: number; current: number }>();
 
   for (const h of holdings ?? []) {
     const sec = rel((h as any).securities);
@@ -43,6 +45,8 @@ export default async function DashboardPage() {
     const curVal = lp != null ? Number(h.quantity) * lp : null;
     current += curVal ?? inv;
     invested += inv;
+    const cid = (h as any).client_id;
+    if (cid) { const ce = byClient.get(cid) ?? { invested: 0, current: 0 }; ce.invested += inv; ce.current += curVal ?? inv; byClient.set(cid, ce); }
     if (sec?.symbol) {
       const e = bySec.get(sec.symbol) ?? { symbol: sec.symbol, name: sec.name ?? '', invested: 0, current: 0, hasPrice: false };
       e.invested += inv;
@@ -66,8 +70,18 @@ export default async function DashboardPage() {
 
   const pl = current - invested;
   const plPct = invested ? (pl / invested) * 100 : 0;
-  const pending = (fees ?? []).reduce((a, f) => a + Number(f.amount), 0);
   const empty = (holdings ?? []).length === 0;
+
+  // Live "fee due now" across the book — milestones crossed but not yet billed
+  // (computed from the engine, replacing the dead fees.status query).
+  const feesBy = new Map<string, any[]>();
+  for (const f of fees ?? []) { const a = feesBy.get(f.client_id) ?? []; a.push(f); feesBy.set(f.client_id, a); }
+  let feeDueTotal = 0;
+  for (const [cid, v] of byClient) {
+    if (!(v.invested > 0)) continue;
+    const { chargedBands, aboveSettled } = deriveState(feesBy.get(cid) ?? [], v.invested);
+    feeDueTotal += computeFee({ capital: v.invested, current: v.current, chargedBands, aboveSettled }).feeDue;
+  }
 
   const topHoldings = [...bySec.values()]
     .map((e) => ({ ...e, value: e.hasPrice ? e.current : e.invested, pl: e.hasPrice ? e.current - e.invested : null }))
@@ -122,11 +136,11 @@ export default async function DashboardPage() {
             <span className="delta" style={{ color: pl >= 0 ? 'var(--gain)' : 'var(--loss)' }}>{pct(plPct)}</span> absolute
           </div>
         </div>
-        <div className="kpi">
-          <div className="eyebrow">Fees pending</div>
-          <div className="val" style={{ color: pending ? 'var(--warn)' : undefined }}>{cr(pending)}</div>
-          <div className="meta">pending &amp; overdue</div>
-        </div>
+        <Link className="kpi" href="/fees" style={{ display: 'block' }}>
+          <div className="eyebrow">Fee due now</div>
+          <div className="val" style={{ color: feeDueTotal ? 'var(--warn)' : undefined }}>{cr(feeDueTotal)}</div>
+          <div className="meta">unbilled milestones →</div>
+        </Link>
       </div>
 
       {empty ? (

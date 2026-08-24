@@ -80,6 +80,18 @@ function tradedTs(tradedAt?: string) {
   return tradedAt ? new Date(`${tradedAt}T00:00:00+05:30`).toISOString() : new Date().toISOString();
 }
 
+// Guard a trade: positive quantity, non-negative price, and no overselling.
+async function validateTrade(supabase: any, clientId: string, securityId: number, side: string, quantity: number, price: number): Promise<string | null> {
+  if (!(quantity > 0)) return 'Quantity must be greater than zero.';
+  if (!(price >= 0)) return 'Price must be zero or more.';
+  if (side === 'Sell') {
+    const { data: h } = await supabase.from('holdings').select('quantity').eq('client_id', clientId).eq('security_id', securityId).maybeSingle();
+    const held = h ? Number(h.quantity) : 0;
+    if (quantity > held + 1e-9) return `Cannot sell ${quantity.toLocaleString('en-IN')} — the client holds only ${held.toLocaleString('en-IN')}.`;
+  }
+  return null;
+}
+
 export async function recordTransaction(input: TxnInput) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -104,6 +116,9 @@ export async function recordTransaction(input: TxnInput) {
     if (cErr || !created) return { ok: false, error: cErr?.message ?? 'Could not create client.' };
     clientId = created.id;
   }
+
+  const vErr = await validateTrade(supabase, clientId, input.securityId, input.side, input.quantity, input.price);
+  if (vErr) return { ok: false, error: vErr };
 
   const { error: tErr } = await supabase.from('transactions').insert({
     client_id: clientId,
@@ -130,7 +145,8 @@ export async function addTransaction(input: {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: 'Not signed in.' };
   if (!input.securityId) return { ok: false, error: 'Please pick a stock.' };
-  if (!(input.quantity > 0)) return { ok: false, error: 'Quantity must be greater than zero.' };
+  const vErr = await validateTrade(supabase, input.clientId, input.securityId, input.side, input.quantity, input.price);
+  if (vErr) return { ok: false, error: vErr };
 
   const { error } = await supabase.from('transactions').insert({
     client_id: input.clientId,
@@ -186,8 +202,17 @@ export async function sellForAllHolders(input: {
   if (!input.securityId) return { ok: false, error: 'Missing stock.' };
   if (!(input.price >= 0)) return { ok: false, error: 'Enter a valid sale price.' };
 
-  const list = (input.sells ?? []).filter((s) => s.clientId && s.quantity > 0);
-  if (!list.length) return { ok: false, error: 'Nothing to sell — set a quantity for at least one client.' };
+  const requested = (input.sells ?? []).filter((s) => s.clientId && s.quantity > 0);
+  if (!requested.length) return { ok: false, error: 'Nothing to sell — set a quantity for at least one client.' };
+
+  // Clamp each client's sell to what they actually hold (no overselling).
+  const { data: hs } = await supabase.from('holdings').select('client_id, quantity')
+    .eq('security_id', input.securityId).in('client_id', requested.map((s) => s.clientId));
+  const heldBy = new Map((hs ?? []).map((h: any) => [h.client_id, Number(h.quantity)]));
+  const list = requested
+    .map((s) => ({ clientId: s.clientId, quantity: Math.min(s.quantity, heldBy.get(s.clientId) ?? 0) }))
+    .filter((s) => s.quantity > 1e-9);
+  if (!list.length) return { ok: false, error: 'Nothing to sell — the quantities exceed current holdings.' };
 
   const traded = tradedTs(input.date);
   const rows = list.map((s) => ({
