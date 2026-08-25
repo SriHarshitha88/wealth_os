@@ -33,7 +33,6 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   const { data: holdings } = await supabase
     .from('holdings').select('quantity, avg_price, securities(last_price)').eq('client_id', id);
-  const { data: mark } = await supabase.from('fee_marks').select('last_basis').eq('client_id', id).maybeSingle();
   const { data: fees } = await supabase.from('fees').select('amount, status, invoice_no, paid_at, due_date').eq('client_id', id);
 
   let invested = 0, current = 0;
@@ -42,7 +41,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     invested += Number(h.quantity) * Number(h.avg_price);
     if (sec?.last_price != null) current += Number(h.quantity) * Number(sec.last_price);
   }
-  const capital = mark && Number(mark.last_basis) > 0 ? Number(mark.last_basis) : invested;
+  const capital = invested; // net invested (tracks deposits) — not a frozen snapshot
   const { chargedBands, aboveSettled } = deriveState(fees ?? [], capital);
   const calc = computeFee({ capital, current, chargedBands, aboveSettled });
 
