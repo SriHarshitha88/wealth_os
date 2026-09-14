@@ -6,6 +6,7 @@ import { unrealisedSplit, financialYearsWithSells, currentFY } from '@/lib/capit
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import ClientWorkspace from '@/components/ClientWorkspace';
+import DownloadMenu from '@/components/DownloadMenu';
 import type { HoldingRow } from '@/components/ClientHoldings';
 import type { GainSlice } from '@/components/CapitalGains';
 
@@ -115,12 +116,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
           <p>{client.phone}{client.email ? ` · ${client.email}` : ''}</p>
         </div>
         <div className="head-tools">
-          <a className="btn primary" href={`/api/report/client/${client.id}`} target="_blank" rel="noopener noreferrer">
-            <svg viewBox="0 0 24 24" fill="none" width="15" height="15">
-              <path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            Download report
-          </a>
+          <DownloadMenu base={`/api/report/client/${client.id}`} label="Download report" primary />
         </div>
       </div>
 

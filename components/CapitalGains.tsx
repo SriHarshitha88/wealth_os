@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { cr } from '@/lib/format';
 import { fyLabelOf, currentFY, type CGBucket } from '@/lib/capital-gains';
 import { useSort, SortTh } from '@/lib/use-sort';
+import DownloadMenu from '@/components/DownloadMenu';
 
 export type GainSlice = {
   symbol: string; name: string; buyDate: string; sellDate: string; qty: number;
@@ -35,7 +36,7 @@ export default function CapitalGains({
           <select value={fy} onChange={(e) => setFy(e.target.value)} style={{ padding: '6px 8px', fontSize: 13 }}>
             {options.map((f) => <option key={f} value={f}>{f}</option>)}
           </select>
-          <a className="btn" style={{ padding: '7px 12px' }} href={`/api/report/gains/${clientId}?fy=${fy}`} target="_blank" rel="noopener">Download statement</a>
+          <DownloadMenu base={`/api/report/gains/${clientId}?fy=${fy}`} label="Download statement" />
         </div>
       </div>
 

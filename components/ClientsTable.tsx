@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { deleteClients } from '@/app/actions/clients';
+import DownloadMenu from '@/components/DownloadMenu';
 import { cr, pct } from '@/lib/format';
 import { useSort, SortTh } from '@/lib/use-sort';
 
@@ -78,12 +79,7 @@ export default function ClientsTable({ rows }: { rows: Row[] }) {
                   <td className={'tnum ' + (c.pl >= 0 ? 'num-pos' : 'num-neg')}>{cr(c.pl)}</td>
                   <td className={'tnum ' + (c.pl >= 0 ? 'num-pos' : 'num-neg')}>{pct(c.plPct)}</td>
                   <td style={{ textAlign: 'left' }}>
-                    <a className="btn" href={`/api/report/client/${c.id}`} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-flex' }}>
-                      <svg viewBox="0 0 24 24" fill="none" width="15" height="15">
-                        <path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                      PDF
-                    </a>
+                    <DownloadMenu base={`/api/report/client/${c.id}`} label="Report" />
                   </td>
                 </tr>
               ))}

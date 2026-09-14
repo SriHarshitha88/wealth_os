@@ -15,7 +15,7 @@ export type FeeStatementProps = {
   capital: number; current: number; gainPct: number;
   ladder: FeeLadderRow[];
   totals: { collected: number; dueNow: number };
-  generatedAt: string; logo: string | null;
+  generatedAt: string; priceAsOf?: string | null; logo: string | null;
 };
 
 const s = StyleSheet.create({
@@ -44,13 +44,17 @@ const s = StyleSheet.create({
   foot: { position: 'absolute', bottom: 30, left: 34, right: 34, borderTopWidth: 0.75, borderTopColor: LINE, paddingTop: 8, fontSize: 7, color: MUTE, lineHeight: 1.4 },
 });
 
-export default function FeeStatementPdf({ client, capital, current, gainPct, ladder, totals, generatedAt, logo }: FeeStatementProps) {
+export default function FeeStatementPdf({ client, capital, current, gainPct, ladder, totals, generatedAt, priceAsOf, logo }: FeeStatementProps) {
   return (
     <Document>
       <Page size="A4" style={s.page}>
         <View style={s.header}>
           {logo ? <Image src={logo} style={s.logo} /> : <View><Text style={s.brand}>Ashesha</Text><Text style={s.brandSub}>WEALTH ADVISORY</Text></View>}
-          <View><Text style={s.stmt}>Performance Fee Statement</Text><Text style={s.asof}>As of {generatedAt}</Text></View>
+          <View>
+            <Text style={s.stmt}>Performance Fee Statement</Text>
+            <Text style={s.asof}>As of {generatedAt}</Text>
+            {priceAsOf ? <Text style={s.asof}>Prices as of {priceAsOf}</Text> : null}
+          </View>
         </View>
         <View style={s.rule} />
 

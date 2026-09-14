@@ -36,13 +36,16 @@ const s = StyleSheet.create({
   note: { fontSize: 6.5, color: MUTE, marginBottom: 2, lineHeight: 1.3 },
   pageNo: { fontSize: 7, color: MUTE, textAlign: 'right', marginTop: 4 },
   // columns (sum = 100%)
-  cSec: { width: '18%' }, cQty: { width: '7%', textAlign: 'right' }, cSince: { width: '9%', textAlign: 'right' },
-  cCur: { width: '13%', textAlign: 'right' }, cCost: { width: '13%', textAlign: 'right' }, cUnrl: { width: '13%', textAlign: 'right' },
-  cReal: { width: '12%', textAlign: 'right' }, cPct: { width: '8%', textAlign: 'right' }, cXirr: { width: '7%', textAlign: 'right' },
+  cSec: { width: '16%' }, cQty: { width: '6%', textAlign: 'right' }, cSince: { width: '8%', textAlign: 'right' },
+  cMkt: { width: '11%', textAlign: 'right' },
+  cCur: { width: '12%', textAlign: 'right' }, cCost: { width: '12%', textAlign: 'right' }, cUnrl: { width: '12%', textAlign: 'right' },
+  cReal: { width: '10%', textAlign: 'right' }, cPct: { width: '7%', textAlign: 'right', paddingRight: 4 }, cXirr: { width: '6%', textAlign: 'right' },
+  mktDate: { fontSize: 5.8, color: MUTE, marginTop: 1, textAlign: 'right' },
 });
 
 export type ReportRow = {
   symbol: string; name: string; sector: string | null; qty: number; avg: number; cur: number | null;
+  curAt: string | null;   // when the market price was last fetched (Friday's close on a weekend)
   investedValue: number; currentValue: number | null; pl: number | null; ret: number | null; realised: number;
   firstBuyDate: string | null; xirr: number | null;
 };
@@ -51,6 +54,7 @@ export type ReportData = {
   rows: ReportRow[];
   totals: { invested: number; current: number; pl: number; plPct: number; realised: number };
   generatedAt: string;
+  priceAsOf?: string | null;   // latest price timestamp across holdings, IST
   logo?: string | null;
 };
 
@@ -62,6 +66,7 @@ function Head() {
       <Text style={[s.th, s.cSec]}>Security</Text>
       <Text style={[s.th, s.cQty]}>Qty</Text>
       <Text style={[s.th, s.cSince]}>Since</Text>
+      <Text style={[s.th, s.cMkt]}>Mkt Price*</Text>
       <Text style={[s.th, s.cCur]}>Current Value*</Text>
       <Text style={[s.th, s.cCost]}>Value at Cost</Text>
       <Text style={[s.th, s.cUnrl]}>Unrealised G/(L)</Text>
@@ -72,7 +77,7 @@ function Head() {
   );
 }
 
-export default function ClientReportPdf({ client, rows, totals, generatedAt, logo }: ReportData) {
+export default function ClientReportPdf({ client, rows, totals, generatedAt, priceAsOf, logo }: ReportData) {
   const open = rows.filter((r) => r.qty > 1e-9);
   const sold = rows.filter((r) => r.qty <= 1e-9 && Math.abs(r.realised) > 0.005);
   const soldRealised = sold.reduce((a, r) => a + r.realised, 0);
@@ -82,7 +87,11 @@ export default function ClientReportPdf({ client, rows, totals, generatedAt, log
       <Page size="A4" style={s.page}>
         <View style={s.header}>
           <View>{logo ? <Image src={logo} style={s.logo} /> : <><Text style={s.brand}>Ashesha Capital</Text><Text style={s.brandSub}>ADVISORY LLP</Text></>}</View>
-          <View><Text style={s.stmt}>Portfolio Statement</Text><Text style={s.asof}>As of {generatedAt}</Text></View>
+          <View>
+            <Text style={s.stmt}>Portfolio Statement</Text>
+            <Text style={s.asof}>As of {generatedAt}</Text>
+            {priceAsOf ? <Text style={s.asof}>Prices as of {priceAsOf}</Text> : null}
+          </View>
         </View>
         <View style={s.rule} />
 
@@ -104,6 +113,10 @@ export default function ClientReportPdf({ client, rows, totals, generatedAt, log
             <View style={s.cSec}><Text style={s.secName}>{r.name || r.symbol}</Text><Text style={s.secSym}>{r.symbol}</Text></View>
             <Text style={s.cQty}>{qtyf(r.qty)}</Text>
             <Text style={s.cSince}>{dt(r.firstBuyDate)}</Text>
+            <View style={s.cMkt}>
+              <Text>{r.cur != null ? num(r.cur) : '-'}</Text>
+              {r.cur != null && r.curAt ? <Text style={s.mktDate}>{dt(r.curAt)}</Text> : null}
+            </View>
             <Text style={s.cCur}>{r.currentValue != null ? num(r.currentValue) : '-'}</Text>
             <Text style={s.cCost}>{num(r.investedValue)}</Text>
             <Text style={[s.cUnrl, { color: glColor(r.pl) }]}>{r.pl != null ? gl(r.pl) : '-'}</Text>
@@ -114,7 +127,7 @@ export default function ClientReportPdf({ client, rows, totals, generatedAt, log
         ))}
         <View style={s.totalRow}>
           <Text style={[s.bold, s.cSec]}>Total Holdings</Text>
-          <Text style={s.cQty}> </Text><Text style={s.cSince}> </Text>
+          <Text style={s.cQty}> </Text><Text style={s.cSince}> </Text><Text style={s.cMkt}> </Text>
           <Text style={[s.bold, s.cCur]}>{num(totals.current)}</Text>
           <Text style={[s.bold, s.cCost]}>{num(totals.invested)}</Text>
           <Text style={[s.bold, s.cUnrl, { color: glColor(totals.pl) }]}>{gl(totals.pl)}</Text>
@@ -133,6 +146,7 @@ export default function ClientReportPdf({ client, rows, totals, generatedAt, log
                 <View style={s.cSec}><Text style={s.secName}>{r.name || r.symbol}</Text><Text style={s.secSym}>{r.symbol}</Text></View>
                 <Text style={s.cQty}>-</Text>
                 <Text style={s.cSince}>{dt(r.firstBuyDate)}</Text>
+                <Text style={s.cMkt}>-</Text>
                 <Text style={s.cCur}>-</Text>
                 <Text style={s.cCost}>-</Text>
                 <Text style={s.cUnrl}>-</Text>
@@ -143,7 +157,7 @@ export default function ClientReportPdf({ client, rows, totals, generatedAt, log
             ))}
             <View style={s.totalRow}>
               <Text style={[s.bold, s.cSec]}>Total Realised</Text>
-              <Text style={s.cQty}> </Text><Text style={s.cSince}> </Text><Text style={s.cCur}> </Text><Text style={s.cCost}> </Text><Text style={s.cUnrl}> </Text>
+              <Text style={s.cQty}> </Text><Text style={s.cSince}> </Text><Text style={s.cMkt}> </Text><Text style={s.cCur}> </Text><Text style={s.cCost}> </Text><Text style={s.cUnrl}> </Text>
               <Text style={[s.bold, s.cReal, { color: glColor(soldRealised) }]}>{gl(soldRealised)}</Text>
               <Text style={s.cPct}> </Text><Text style={s.cXirr}> </Text>
             </View>
@@ -152,7 +166,7 @@ export default function ClientReportPdf({ client, rows, totals, generatedAt, log
         )}
 
         <View style={s.footer} fixed>
-          <Text style={s.note}>* Current value is basis the last available stock price and may differ from realisable value. XIRR is the annualised money-weighted return.</Text>
+          <Text style={s.note}>* Market Price is the last available stock price (previous trading day&apos;s close on weekends/holidays); the date under each price shows when it is from. Current value is basis that price and may differ from realisable value. XIRR is the annualised money-weighted return.</Text>
           <Text style={s.note}>Value at Cost is the purchase cost of the holding. Figures are indicative and do not constitute investment advice.</Text>
           <Text style={s.pageNo} render={({ pageNumber, totalPages }) => `Ashesha Capital Advisory LLP  ·  Page ${pageNumber} of ${totalPages}`} />
         </View>

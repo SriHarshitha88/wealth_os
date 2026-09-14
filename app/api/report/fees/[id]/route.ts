@@ -6,6 +6,10 @@ import path from 'node:path';
 import { createClient } from '@/lib/supabase/server';
 import { computeFee, deriveState, BAND_RATES, BAND_STEP } from '@/lib/fee-schedule';
 import FeeStatementPdf, { type FeeLadderRow } from '@/components/FeeStatementPdf';
+import {
+  newWorkbook, addHeader, addTableHead, styleDataRow, styleTotalRow, addNote,
+  xlsxResponse, fmtIST, latestPriceAt, FMT_MONEY, XLC,
+} from '@/lib/excel';
 
 let logoPromise: Promise<string | null> | null = null;
 function getLogo() {
@@ -24,15 +28,16 @@ const rel = (x: any) => (Array.isArray(x) ? x[0] : x);
 const fmt = (d: string | null) =>
   d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' }) : null;
 
-export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const format = (req.nextUrl.searchParams.get('format') ?? 'pdf').toLowerCase();
   const supabase = await createClient();
 
   const { data: client } = await supabase.from('clients').select('name, phone, email').eq('id', id).maybeSingle();
   if (!client) return new Response('Client not found', { status: 404 });
 
   const { data: holdings } = await supabase
-    .from('holdings').select('quantity, avg_price, securities(last_price)').eq('client_id', id);
+    .from('holdings').select('quantity, avg_price, securities(last_price, last_price_at)').eq('client_id', id);
   const { data: fees } = await supabase.from('fees').select('amount, status, invoice_no, paid_at, due_date').eq('client_id', id);
 
   let invested = 0, current = 0;
@@ -66,16 +71,66 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     .reduce((a, f) => a + Number(f.amount), 0);
 
   const generatedAt = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kolkata' });
-  const logo = await getLogo();
+  const priceAsOf = fmtIST(latestPriceAt((holdings ?? []).map((h) => rel((h as any).securities)?.last_price_at)));
+  const safe = client.name.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '') || 'client';
 
+  if (format === 'xlsx') {
+    const wb = newWorkbook();
+    const ws = wb.addWorksheet('Fee Statement', { views: [{ showGridLines: false }] });
+    ws.columns = [{ width: 28 }, { width: 12 }, { width: 18 }, { width: 16 }, { width: 20 }];
+
+    addHeader(ws, 'Performance Fee Statement', [
+      `${client.name}${client.phone ? `  ·  ${client.phone}` : ''}${client.email ? `  ·  ${client.email}` : ''}`,
+      `As of ${generatedAt}`,
+      ...(priceAsOf ? [`Market prices as of ${priceAsOf} (last available close)`] : []),
+    ]);
+
+    const sum = [
+      ['Capital (Rs)', capital], ['Current value (Rs)', current],
+      ['Appreciation %', calc.gainPct], ['Fees collected (Rs)', collected], ['Fee due now (Rs)', calc.feeDue],
+    ] as const;
+    for (const [label, val] of sum) {
+      const r = ws.addRow([label, val]);
+      r.getCell(1).font = { size: 10, color: { argb: XLC.mute } };
+      r.getCell(2).numFmt = label.includes('%') ? '+0.00"%";-0.00"%"' : FMT_MONEY;
+      r.getCell(2).font = { bold: true, size: 10 };
+      r.getCell(2).alignment = { horizontal: 'right' };
+    }
+    ws.addRow([]);
+
+    addTableHead(ws, ['Milestone', 'Rate', 'Target value', 'Fee', 'Status'], 2);
+    ladder.forEach((r, i) => {
+      const row = ws.addRow([
+        `+${r.milestonePct}% appreciation`, r.rate / 100, r.targetValue, r.fee,
+        r.status === 'Billed' && r.date ? `Billed ${r.date}` : r.status,
+      ]);
+      styleDataRow(row, i);
+      row.getCell(2).numFmt = '0.0%';
+      row.getCell(3).numFmt = FMT_MONEY;
+      row.getCell(4).numFmt = FMT_MONEY;
+      for (const c of [2, 3, 4, 5]) row.getCell(c).alignment = { horizontal: 'right' };
+      row.getCell(5).font = { size: 10, color: { argb: r.status === 'Billed' ? XLC.gain : r.status === 'Due' ? XLC.gold : XLC.mute } };
+    });
+    const tot = ws.addRow(['Total collected to date', '', '', collected, '']);
+    styleTotalRow(tot);
+    tot.getCell(4).numFmt = FMT_MONEY;
+    tot.getCell(4).alignment = { horizontal: 'right' };
+
+    ws.addRow([]);
+    addNote(ws, 'Performance fee is charged once on each 20% band of appreciation over invested capital, at rising slab rates (5% / 10% / 12.5% / 15% / 25%), then 25% flat above +100%.');
+    addNote(ws, 'Current value is basis the last available market prices (see the prices-as-of stamp above). Generated from recorded transactions and collected fees; please verify against your records.');
+
+    return xlsxResponse(wb, `fee-statement-${safe}.xlsx`);
+  }
+
+  const logo = await getLogo();
   const buffer = await renderToBuffer(
     createElement(FeeStatementPdf, {
       client, capital, current, gainPct: calc.gainPct, ladder,
-      totals: { collected, dueNow: calc.feeDue }, generatedAt, logo,
+      totals: { collected, dueNow: calc.feeDue }, generatedAt, priceAsOf, logo,
     }) as any,
   );
 
-  const safe = client.name.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '') || 'client';
   return new Response(new Uint8Array(buffer), {
     headers: { 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="fee-statement-${safe}.pdf"` },
   });

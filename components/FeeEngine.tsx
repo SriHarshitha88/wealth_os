@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { cr } from '@/lib/format';
 import { BAND_RATES, BAND_STEP } from '@/lib/fee-schedule';
 import { raiseFee, recordMilestone } from '@/app/actions/fees';
+import DownloadMenu from '@/components/DownloadMenu';
 
 export type FeeCollected = { level: number | null; isAbove: boolean; amount: number; date: string | null };
 export type FeeRow = {
@@ -179,7 +180,7 @@ export default function FeeEngine({ rows }: { rows: FeeRow[] }) {
 
             <div className="drawer-foot">
               {row.feeDue > 0 && <button className="btn primary" disabled={busy} onClick={() => billAll(row)}>{busy ? 'Billing…' : `Bill ${cr(row.feeDue)} now`}</button>}
-              <a className="btn" href={`/api/report/fees/${row.id}`} target="_blank" rel="noopener" style={{ marginLeft: 'auto' }}>Download statement</a>
+              <div style={{ marginLeft: 'auto' }}><DownloadMenu base={`/api/report/fees/${row.id}`} label="Download statement" /></div>
             </div>
           </>
         )}

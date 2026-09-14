@@ -212,6 +212,16 @@ thead th.sort-th { padding:0; }
 .sort-opt .ck { margin-left:auto; color:var(--brand); }
 .sort-sep { height:1px; background:var(--line-soft); margin:5px 6px; }
 .sort-menu.wide { min-width:212px; }
+
+/* ---- download format dropdown (PDF / Excel) ---- */
+.dl-wrap { position:relative; display:inline-block; }
+.dl-caret { font-size:9px; opacity:.6; margin-left:2px; }
+.dl-menu { position:absolute; right:0; top:calc(100% + 6px); z-index:120; min-width:198px; }
+.dl-menu a { text-decoration:none; }
+.dl-ext { display:inline-flex; align-items:center; justify-content:center; width:32px; padding:2px 0; border-radius:5px;
+  font-size:9.5px; font-weight:700; letter-spacing:.04em; color:#fff; }
+.dl-ext.pdf { background:var(--loss); }
+.dl-ext.xls { background:var(--gain); }
 .sort-funnel { margin-left:3px; color:var(--brand); }
 .filt-label { font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-4); font-weight:600; padding:4px 11px 4px; }
 .filt-row { display:flex; gap:6px; padding:2px 8px; }
