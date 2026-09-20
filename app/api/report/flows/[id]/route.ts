@@ -4,7 +4,7 @@ import { createElement } from 'react';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createClient } from '@/lib/supabase/server';
-import { computeCapitalFlows, fyStartOf, todayIST, type FlowTxnRow, type FeeRow } from '@/lib/capital-flows';
+import { computeCapitalFlows, fyStartOf, todayIST, type FlowTxnRow } from '@/lib/capital-flows';
 import CapitalFlowsPdf from '@/components/CapitalFlowsPdf';
 import {
   newWorkbook, addHeader, addTableHead, styleDataRow, styleTotalRow, addNote,
@@ -42,10 +42,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     .from('transactions')
     .select('side, quantity, price, traded_at, security_id, securities(symbol, last_price, last_price_at)')
     .eq('client_id', id);
-  const { data: fees } = await supabase
-    .from('fees').select('amount, status, invoice_no, paid_at, due_date').eq('client_id', id);
-
-  const report = computeCapitalFlows((txns ?? []) as FlowTxnRow[], (fees ?? []) as FeeRow[], from, to, today);
+  const report = computeCapitalFlows((txns ?? []) as FlowTxnRow[], from, to, today);
   const priceAsOf = report.closingAtCost
     ? null
     : fmtIST(latestPriceAt((txns ?? []).map((t) => rel((t as any).securities)?.last_price_at)));
@@ -71,7 +68,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       ['Capital outflows (sale proceeds + withdrawals)', -report.outflows],
       ['Net flows', report.netFlows],
       ['Mark-to-market gains / (losses)', report.mtm],
-      ['Fees & charges collected', -report.fees],
       [`Closing AUM · ${dtL(report.to)}${report.closingAtCost ? ' (at cost)' : ' (at market)'}`, report.closingAum],
     ] as const;
     rec.forEach(([label, val], i) => {
@@ -94,18 +90,18 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     report.events.forEach((e, i) => {
       const row = ws.addRow([dtL(e.date), e.kind, e.label, e.inAmt ?? '-', e.outAmt ?? '-']);
       styleDataRow(row, i);
-      row.getCell(2).font = { size: 10, color: { argb: e.kind === 'Inflow' ? XLC.gain : e.kind === 'Fee' ? XLC.gold : XLC.loss } };
+      row.getCell(2).font = { size: 10, color: { argb: e.kind === 'Inflow' ? XLC.gain : XLC.loss } };
       for (const c of [4, 5]) { row.getCell(c).numFmt = FMT_MONEY; row.getCell(c).alignment = { horizontal: 'right' }; }
     });
     if (report.events.length > 0) {
-      const tr = ws.addRow(['Total', '', '', report.inflows, report.outflows + report.fees]);
+      const tr = ws.addRow(['Total', '', '', report.inflows, report.outflows]);
       styleTotalRow(tr);
       for (const c of [4, 5]) { tr.getCell(c).numFmt = FMT_MONEY; tr.getCell(c).alignment = { horizontal: 'right' }; }
     }
 
     ws.addRow([]);
-    addNote(ws, 'Closing AUM = Opening AUM + Net Flows + MTM Gains/(Losses) − Fees. MTM is derived as the balancing figure of this identity.');
-    addNote(ws, 'Historical market prices are not stored, so past-dated AUM is stated at cost. Dividends, bonuses and splits are portfolio income / corporate actions, not client capital flows.');
+    addNote(ws, 'Closing AUM = Opening AUM + Net Flows + MTM Gains/(Losses). MTM is derived as the balancing figure of this identity.');
+    addNote(ws, 'Historical market prices are not stored, so past-dated AUM is stated at cost. Dividends, bonuses and splits are portfolio income / corporate actions, and advisory fees are invoiced outside the portfolio — none of these are client capital flows.');
     addNote(ws, 'Figures are indicative and do not constitute investment advice. Ashesha Capital Advisory LLP.');
 
     return xlsxResponse(wb, `${fileBase}.xlsx`);

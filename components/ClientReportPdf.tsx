@@ -26,6 +26,7 @@ const s = StyleSheet.create({
   sectionTitle: { fontSize: 10, fontFamily: 'Helvetica-Bold', marginBottom: 6, marginTop: 6 },
   thead: { flexDirection: 'row', backgroundColor: BRAND, paddingVertical: 6, paddingHorizontal: 4 },
   th: { fontSize: 6.8, color: '#FFFFFF', fontFamily: 'Helvetica-Bold' },
+  thSub: { fontSize: 5.8, fontFamily: 'Helvetica', marginTop: 1 },
   row: { flexDirection: 'row', borderBottomWidth: 0.75, borderBottomColor: LINE, paddingVertical: 5, paddingHorizontal: 4 },
   rowAlt: { backgroundColor: ZEBRA },
   totalRow: { flexDirection: 'row', backgroundColor: BAND, paddingVertical: 7, paddingHorizontal: 4, borderTopWidth: 1, borderTopColor: BRAND },
@@ -41,6 +42,7 @@ const s = StyleSheet.create({
   cCur: { width: '12%', textAlign: 'right' }, cCost: { width: '12%', textAlign: 'right' }, cUnrl: { width: '12%', textAlign: 'right' },
   cReal: { width: '10%', textAlign: 'right' }, cPct: { width: '7%', textAlign: 'right', paddingRight: 4 }, cXirr: { width: '6%', textAlign: 'right' },
   mktDate: { fontSize: 5.8, color: MUTE, marginTop: 1, textAlign: 'right' },
+  costAvg: { fontSize: 5.8, color: MUTE, marginTop: 1, textAlign: 'right' },
 });
 
 export type ReportRow = {
@@ -68,7 +70,7 @@ function Head() {
       <Text style={[s.th, s.cSince]}>Since</Text>
       <Text style={[s.th, s.cMkt]}>Mkt Price*</Text>
       <Text style={[s.th, s.cCur]}>Current Value*</Text>
-      <Text style={[s.th, s.cCost]}>Value at Cost</Text>
+      <View style={s.cCost}><Text style={s.th}>Value at Cost</Text><Text style={[s.th, s.thSub]}>(purchase price)</Text></View>
       <Text style={[s.th, s.cUnrl]}>Unrealised G/(L)</Text>
       <Text style={[s.th, s.cReal]}>Realised G/(L)</Text>
       <Text style={[s.th, s.cPct]}>Gain %</Text>
@@ -118,7 +120,10 @@ export default function ClientReportPdf({ client, rows, totals, generatedAt, pri
               {r.cur != null && r.curAt ? <Text style={s.mktDate}>{dt(r.curAt)}</Text> : null}
             </View>
             <Text style={s.cCur}>{r.currentValue != null ? num(r.currentValue) : '-'}</Text>
-            <Text style={s.cCost}>{num(r.investedValue)}</Text>
+            <View style={s.cCost}>
+              <Text>{num(r.investedValue)}</Text>
+              <Text style={s.costAvg}>@ {num(r.avg)}</Text>
+            </View>
             <Text style={[s.cUnrl, { color: glColor(r.pl) }]}>{r.pl != null ? gl(r.pl) : '-'}</Text>
             <Text style={[s.cReal, { color: glColor(Math.abs(r.realised) < 0.005 ? null : r.realised) }]}>{Math.abs(r.realised) < 0.005 ? '-' : gl(r.realised)}</Text>
             <Text style={[s.cPct, { color: glColor(r.pl) }]}>{pctf(r.ret)}</Text>
@@ -167,7 +172,7 @@ export default function ClientReportPdf({ client, rows, totals, generatedAt, pri
 
         <View style={s.footer} fixed>
           <Text style={s.note}>* Market Price is the last available stock price (previous trading day&apos;s close on weekends/holidays); the date under each price shows when it is from. Current value is basis that price and may differ from realisable value. XIRR is the annualised money-weighted return.</Text>
-          <Text style={s.note}>Value at Cost is the purchase cost of the holding. Figures are indicative and do not constitute investment advice.</Text>
+          <Text style={s.note}>Value at Cost is the purchase cost of the holding; the figure beneath it is the average purchase price per unit. Figures are indicative and do not constitute investment advice.</Text>
           <Text style={s.pageNo} render={({ pageNumber, totalPages }) => `Ashesha Capital Advisory LLP  ·  Page ${pageNumber} of ${totalPages}`} />
         </View>
       </Page>

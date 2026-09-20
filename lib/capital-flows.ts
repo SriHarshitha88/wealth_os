@@ -1,10 +1,12 @@
 // Client PMS capital-flow report: movement of capital in and out of a client's
 // segregated portfolio over a period, reconciled the way a PMS statement does:
 //
-//   Closing AUM = Opening AUM + Net Flows + MTM Gains/(Losses) − Fees
+//   Closing AUM = Opening AUM + Net Flows + MTM Gains/(Losses)
 //
 // Inflows are capital deployed into the portfolio (Buy/IPO cost + Deposits),
-// outflows are capital returned (Sell proceeds + Withdrawals). Historical
+// outflows are capital returned (Sell proceeds + Withdrawals). Advisory fees
+// are invoiced and settled outside the segregated portfolio, so they are not
+// capital movements and do not appear in this statement. Historical
 // market prices are not stored, so AUM at a past date is stated AT COST (the
 // cost basis of lots held on that date); today's closing AUM uses live market
 // prices. MTM is derived as the balancing figure of the identity above.
@@ -12,11 +14,10 @@
 import { computeLots, type LedgerTxn } from '@/lib/portfolio-calc';
 
 export type FlowTxnRow = LedgerTxn & { security_id: number | null; securities?: any };
-export type FeeRow = { amount: number | string; status: string; invoice_no: string | null; paid_at: string | null; due_date: string | null };
 
 export type FlowEvent = {
   date: string;               // ISO
-  kind: 'Inflow' | 'Outflow' | 'Fee';
+  kind: 'Inflow' | 'Outflow';
   label: string;              // e.g. "Buy RELIANCE · 100 @ 2,850.00"
   inAmt: number | null;
   outAmt: number | null;
@@ -26,7 +27,6 @@ export type FlowReport = {
   from: string; to: string;                    // ISO dates (inclusive)
   openingAum: number; openingAtCost: boolean;
   inflows: number; outflows: number; netFlows: number;
-  fees: number;
   mtm: number;                                 // derived (balancing figure)
   closingAum: number; closingAtCost: boolean;
   events: FlowEvent[];                         // chronological ledger of flows in the period
@@ -77,7 +77,7 @@ function marketValueAt(txns: FlowTxnRow[], atISO: string): number {
 }
 
 export function computeCapitalFlows(
-  txns: FlowTxnRow[], fees: FeeRow[], from: string, to: string, todayISO: string,
+  txns: FlowTxnRow[], from: string, to: string, todayISO: string,
 ): FlowReport {
   const dayBeforeFrom = new Date(new Date(from + 'T00:00:00Z').getTime() - 86_400_000).toISOString().slice(0, 10);
 
@@ -111,16 +111,6 @@ export function computeCapitalFlows(
     // Dividend / Bonus / Split: portfolio income & corporate actions, not client capital flows.
   }
 
-  let feesTotal = 0;
-  for (const f of fees) {
-    if (f.status !== 'Collected') continue;
-    const d = day(f.paid_at ?? f.due_date ?? '');
-    if (!d || d < from || d > to) continue;
-    const amt = Number(f.amount) || 0;
-    feesTotal += amt;
-    events.push({ date: (f.paid_at ?? f.due_date)!, kind: 'Fee', label: `Advisory fee${f.invoice_no ? ` · ${f.invoice_no}` : ''}`, inAmt: null, outAmt: amt });
-  }
-
   events.sort((a, b) => a.date.localeCompare(b.date));
 
   const openingAum = costBasisAt(txns, dayBeforeFrom);
@@ -128,13 +118,13 @@ export function computeCapitalFlows(
   const closingAum = closingLive ? marketValueAt(txns, to) : costBasisAt(txns, to);
 
   const netFlows = inflows - outflows;
-  const mtm = closingAum - openingAum - netFlows + feesTotal;
+  const mtm = closingAum - openingAum - netFlows;
 
   return {
     from, to,
     openingAum, openingAtCost: true,
     inflows, outflows, netFlows,
-    fees: feesTotal, mtm,
+    mtm,
     closingAum, closingAtCost: !closingLive,
     events,
   };

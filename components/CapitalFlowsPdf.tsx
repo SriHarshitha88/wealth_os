@@ -82,7 +82,6 @@ export default function CapitalFlowsPdf({ client, report: r, generatedAt, priceA
         <View style={s.recRow}><Text style={s.recLabel}>Capital outflows (sale proceeds + withdrawals)</Text><Text style={[s.recVal, { color: LOSS }]}>({num(r.outflows)})</Text></View>
         <View style={s.recRow}><Text style={[s.recLabel, s.bold]}>Net flows (inflows less outflows)</Text><Text style={[s.recVal, s.bold, { color: glColor(r.netFlows) }]}>{gl(r.netFlows)}</Text></View>
         <View style={s.recRow}><Text style={s.recLabel}>Mark-to-market gains / (losses)†</Text><Text style={[s.recVal, { color: glColor(r.mtm) }]}>{gl(r.mtm)}</Text></View>
-        <View style={s.recRow}><Text style={s.recLabel}>Fees & charges collected</Text><Text style={[s.recVal, { color: LOSS }]}>{r.fees ? `(${num(r.fees)})` : '-'}</Text></View>
         <View style={s.recTotal}>
           <View style={s.recLabel}><Text style={s.bold}>Closing AUM · {dt(r.to)}</Text>{r.closingAtCost ? <Text style={s.recSub}>at cost — period ends before today</Text> : <Text style={s.recSub}>at last available market prices</Text>}</View>
           <Text style={[s.recVal, s.bold]}>{num(r.closingAum)}</Text>
@@ -101,7 +100,7 @@ export default function CapitalFlowsPdf({ client, report: r, generatedAt, priceA
         ) : r.events.map((e, i) => (
           <View style={[s.row, ...(i % 2 ? [s.rowAlt] : [])]} key={i} wrap={false}>
             <Text style={s.cDate}>{dt(e.date)}</Text>
-            <Text style={[s.cKind, { color: e.kind === 'Inflow' ? GAIN : e.kind === 'Fee' ? GOLD : LOSS }]}>{e.kind}</Text>
+            <Text style={[s.cKind, { color: e.kind === 'Inflow' ? GAIN : LOSS }]}>{e.kind}</Text>
             <Text style={s.cLabel}>{e.label}</Text>
             <Text style={s.cIn}>{e.inAmt != null ? num(e.inAmt) : '-'}</Text>
             <Text style={s.cOut}>{e.outAmt != null ? num(e.outAmt) : '-'}</Text>
@@ -112,16 +111,17 @@ export default function CapitalFlowsPdf({ client, report: r, generatedAt, priceA
             <Text style={[s.bold, s.cDate]}>Total</Text>
             <Text style={s.cKind}> </Text><Text style={s.cLabel}> </Text>
             <Text style={[s.bold, s.cIn]}>{num(r.inflows)}</Text>
-            <Text style={[s.bold, s.cOut]}>{num(r.outflows + r.fees)}</Text>
+            <Text style={[s.bold, s.cOut]}>{num(r.outflows)}</Text>
           </View>
         )}
 
         <View style={s.foot} fixed>
           <Text>
-            Closing AUM = Opening AUM + Net Flows + MTM Gains/(Losses) less Fees. † MTM is derived as the balancing figure of
-            this identity; historical market prices are not stored, so past-dated AUM is stated at cost. Dividends, bonuses
-            and splits are portfolio income / corporate actions, not client capital flows. Figures are indicative and do not
-            constitute investment advice. Ashesha Capital Advisory LLP.
+            Closing AUM = Opening AUM + Net Flows + MTM Gains/(Losses). † MTM is derived as the balancing figure of this
+            identity; historical market prices are not stored, so past-dated AUM is stated at cost. Dividends, bonuses and
+            splits are portfolio income / corporate actions, and advisory fees are invoiced outside the segregated portfolio
+            — none of these are client capital flows. Figures are indicative and do not constitute investment advice.
+            Ashesha Capital Advisory LLP.
           </Text>
         </View>
       </Page>

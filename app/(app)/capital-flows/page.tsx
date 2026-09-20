@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
-import { computeCapitalFlows, fyStartOf, todayIST, type FlowTxnRow, type FeeRow } from '@/lib/capital-flows';
+import { computeCapitalFlows, fyStartOf, todayIST, type FlowTxnRow } from '@/lib/capital-flows';
 import { fmtIST, latestPriceAt } from '@/lib/excel';
 import { cr } from '@/lib/format';
 import CapitalFlowsControls from '@/components/CapitalFlowsControls';
@@ -32,9 +32,7 @@ export default async function CapitalFlowsPage({ searchParams }: { searchParams:
       .from('transactions')
       .select('side, quantity, price, traded_at, security_id, securities(symbol, last_price, last_price_at)')
       .eq('client_id', clientId);
-    const { data: fees } = await supabase
-      .from('fees').select('amount, status, invoice_no, paid_at, due_date').eq('client_id', clientId);
-    report = computeCapitalFlows((txns ?? []) as FlowTxnRow[], (fees ?? []) as FeeRow[], from, to, today);
+    report = computeCapitalFlows((txns ?? []) as FlowTxnRow[], from, to, today);
     if (!report.closingAtCost) {
       priceAsOf = fmtIST(latestPriceAt((txns ?? []).map((t) => rel((t as any).securities)?.last_price_at)));
     }
@@ -112,18 +110,15 @@ export default async function CapitalFlowsPage({ searchParams }: { searchParams:
                     <td className="tnum" style={glStyle(report.mtm)}>{gl(report.mtm)}</td>
                   </tr>
                   <tr>
-                    <td style={{ textAlign: 'left' }}>Fees &amp; charges collected</td>
-                    <td className="tnum">{report.fees ? <span className="num-neg">({inr2(report.fees)})</span> : '—'}</td>
-                  </tr>
-                  <tr>
                     <td style={{ textAlign: 'left', fontWeight: 700 }}>Closing AUM · {dtL(report.to)}{report.closingAtCost && <span style={{ color: 'var(--ink-3)', fontSize: 12, fontWeight: 400 }}> (at cost)</span>}</td>
                     <td className="tnum" style={{ fontWeight: 700 }}>{inr2(report.closingAum)}</td>
                   </tr>
                 </tbody>
               </table>
               <p style={{ fontSize: 12, color: 'var(--ink-3)', margin: '10px 2px 0' }}>
-                Closing AUM = Opening AUM + Net Flows + MTM − Fees. MTM is derived as the balancing figure; past-dated AUM is
-                stated at cost since historical market prices are not stored. Official PMS disclosures are on the{' '}
+                Closing AUM = Opening AUM + Net Flows + MTM. MTM is derived as the balancing figure; past-dated AUM is stated
+                at cost since historical market prices are not stored. Advisory fees are invoiced separately and are not
+                capital movements. Official PMS disclosures are on the{' '}
                 <a href="https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doPmr=yes" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--brand)' }}>SEBI Portfolio Managers portal</a>.
               </p>
             </div>
@@ -150,7 +145,7 @@ export default async function CapitalFlowsPage({ searchParams }: { searchParams:
                       <tr key={i}>
                         <td style={{ textAlign: 'left', color: 'var(--ink-3)', fontSize: 12.5 }}>{dtL(e.date)}</td>
                         <td style={{ textAlign: 'left' }}>
-                          <span className={'pill ' + (e.kind === 'Inflow' ? 'gain' : e.kind === 'Fee' ? 'gold' : 'silv')} style={{ fontSize: 11 }}>{e.kind}</span>
+                          <span className={'pill ' + (e.kind === 'Inflow' ? 'gain' : 'silv')} style={{ fontSize: 11 }}>{e.kind}</span>
                         </td>
                         <td style={{ textAlign: 'left' }}>{e.label}</td>
                         <td className="tnum num-pos">{e.inAmt != null ? inr2(e.inAmt) : '—'}</td>
@@ -161,7 +156,7 @@ export default async function CapitalFlowsPage({ searchParams }: { searchParams:
                       <td style={{ textAlign: 'left', fontWeight: 700 }}>Total</td>
                       <td /><td />
                       <td className="tnum" style={{ fontWeight: 700 }}>{inr2(report.inflows)}</td>
-                      <td className="tnum" style={{ fontWeight: 700 }}>{inr2(report.outflows + report.fees)}</td>
+                      <td className="tnum" style={{ fontWeight: 700 }}>{inr2(report.outflows)}</td>
                     </tr>
                   </tbody>
                 </table>
