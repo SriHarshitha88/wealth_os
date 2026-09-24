@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/server';
 import { computeLots } from '@/lib/portfolio-calc';
 import { fyLabelOf, currentFY } from '@/lib/capital-gains';
 import CapitalGainsPdf, { type CGRow, type CGTotals } from '@/components/CapitalGainsPdf';
+import { REPORT_COLUMNS, parseCols } from '@/lib/report-columns';
 import {
   newWorkbook, addHeader, addTableHead, styleDataRow, styleTotalRow, addNote,
   gainFont, xlsxResponse, FMT_MONEY, FMT_QTY, XLC,
@@ -45,7 +46,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     e.txns.push(t); bySec.set(t.security_id, e);
   }
 
-  const rows: CGRow[] = [];
+  let rows: CGRow[] = [];   // reassigned below if the console asked for ST-only / LT-only
   for (const { sym, txns: ts } of bySec.values()) {
     for (const s of computeLots(ts).realisedSlices) {
       if (fyLabelOf(s.sellDate) !== fy) continue;
@@ -60,13 +61,21 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     else { totals.stGain += r.gain; totals.stProceeds += r.proceeds; totals.stCost += r.cost; }
   }
 
+  const on = parseCols('gains', req.nextUrl.searchParams.get('cols'));
+  const rowMode = req.nextUrl.searchParams.get('rows') ?? 'all';
+  // The row filter narrows the listed slices. The summary cards deliberately keep
+  // the whole-FY short/long totals, since that is the figure that goes on a return.
+  if (rowMode === 'short') rows = rows.filter((r) => !r.longTerm);
+  else if (rowMode === 'long') rows = rows.filter((r) => r.longTerm);
+
   const generatedAt = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kolkata' });
   const safe = client.name.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '') || 'client';
 
   if ((req.nextUrl.searchParams.get('format') ?? 'pdf').toLowerCase() === 'xlsx') {
     const wb = newWorkbook();
     const ws = wb.addWorksheet(`FY ${fy}`.slice(0, 31), { views: [{ showGridLines: false }] });
-    ws.columns = [{ width: 16 }, { width: 13 }, { width: 13 }, { width: 9 }, { width: 12 }, { width: 15 }, { width: 15 }, { width: 15 }, { width: 9 }];
+    const cols = REPORT_COLUMNS.gains.filter((c) => on.has(c.key));
+    ws.columns = cols.map((c) => ({ width: c.key === 'security' ? 16 : Math.max(10, c.label.length + 4) }));
 
     addHeader(ws, `Capital Gains Statement · FY ${fy}`, [
       `${client.name}${client.phone ? `  ·  ${client.phone}` : ''}${client.email ? `  ·  ${client.email}` : ''}`,
@@ -86,30 +95,39 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     }
     ws.addRow([]);
 
-    for (const [title, subset, gain] of [
-      [`Short-term (held ≤ 365 days)`, rows.filter((r) => !r.longTerm), totals.stGain],
-      [`Long-term (held > 365 days)`, rows.filter((r) => r.longTerm), totals.ltGain],
-    ] as const) {
+    const sections: [string, typeof rows, number][] = [];
+    if (rowMode !== 'long') sections.push([`Short-term (held ≤ 365 days)`, rows.filter((r) => !r.longTerm), totals.stGain]);
+    if (rowMode !== 'short') sections.push([`Long-term (held > 365 days)`, rows.filter((r) => r.longTerm), totals.ltGain]);
+    for (const [title, subset, gain] of sections) {
       const sect = ws.addRow([title]);
       sect.getCell(1).font = { bold: true, size: 11 };
-      addTableHead(ws, ['Security', 'Bought', 'Sold', 'Days', 'Qty', 'Buy Value', 'Sell Value', 'Gain / (Loss)', 'Type'], 2);
+      addTableHead(ws, cols.map((c) => c.label), 2);
       if (subset.length === 0) {
         const r = ws.addRow(['None in this period.']);
         r.getCell(1).font = { size: 9.5, italic: true, color: { argb: XLC.mute } };
       }
+      const valueOf = (key: string, r: (typeof subset)[number]) =>
+        key === 'security' ? r.symbol : key === 'bought' ? r.buyDate : key === 'sold' ? r.sellDate
+          : key === 'days' ? r.holdingDays : key === 'qty' ? r.qty : key === 'buyval' ? r.cost
+          : key === 'sellval' ? r.proceeds : key === 'gain' ? r.gain
+          : key === 'type' ? (r.longTerm ? 'LTCG' : 'STCG') : '';
       subset.forEach((r, i) => {
-        const row = ws.addRow([r.symbol, r.buyDate, r.sellDate, r.holdingDays, r.qty, r.cost, r.proceeds, r.gain, r.longTerm ? 'LTCG' : 'STCG']);
+        const row = ws.addRow(cols.map((c) => valueOf(c.key, r)));
         styleDataRow(row, i);
-        row.getCell(5).numFmt = FMT_QTY;
-        for (const c of [6, 7, 8]) row.getCell(c).numFmt = FMT_MONEY;
-        for (const c of [2, 3, 4, 5, 6, 7, 8, 9]) row.getCell(c).alignment = { horizontal: 'right' };
-        row.getCell(8).font = gainFont(r.gain);
+        cols.forEach((c, ci) => {
+          const cell = row.getCell(ci + 1);
+          if (c.key === 'qty') cell.numFmt = FMT_QTY;
+          else if (c.key === 'buyval' || c.key === 'sellval' || c.key === 'gain') cell.numFmt = FMT_MONEY;
+          if (c.num) cell.alignment = { horizontal: 'right' };
+          if (c.key === 'gain') cell.font = gainFont(r.gain);
+        });
       });
-      const tr = ws.addRow(['Subtotal', '', '', '', '', '', '', gain, '']);
+      const tr = ws.addRow(cols.map((c) => (c.key === 'security' ? 'Subtotal' : c.key === 'gain' ? gain : '')));
       styleTotalRow(tr);
-      tr.getCell(8).numFmt = FMT_MONEY;
-      tr.getCell(8).alignment = { horizontal: 'right' };
-      tr.getCell(8).font = gainFont(gain, true);
+      cols.forEach((c, ci) => {
+        if (c.key === 'gain') { tr.getCell(ci + 1).numFmt = FMT_MONEY; tr.getCell(ci + 1).font = gainFont(gain, true); }
+        if (c.num) tr.getCell(ci + 1).alignment = { horizontal: 'right' };
+      });
       ws.addRow([]);
     }
 
@@ -118,7 +136,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   }
 
   const logo = await getLogo();
-  const buffer = await renderToBuffer(createElement(CapitalGainsPdf, { client, fy, rows, totals, generatedAt, logo }) as any);
+  const buffer = await renderToBuffer(createElement(CapitalGainsPdf, { client, fy, rows, totals, generatedAt, logo, cols: [...on] }) as any);
 
   return new Response(new Uint8Array(buffer), {
     headers: { 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="capital-gains-${safe}-FY${fy}.pdf"` },

@@ -1,4 +1,5 @@
 import { Document, Page, View, Text, Image, StyleSheet } from '@react-pdf/renderer';
+import { layout, defaultCols } from '@/lib/report-columns';
 
 const num = (n: number) =>
   Math.abs(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -11,6 +12,7 @@ export type FeeLadderRow = {
   status: 'Billed' | 'Due' | 'Upcoming'; date: string | null;
 };
 export type FeeStatementProps = {
+  cols?: string[];         // selected column keys, in canonical order
   client: { name: string; phone?: string | null; email?: string | null };
   capital: number; current: number; gainPct: number;
   ladder: FeeLadderRow[];
@@ -44,7 +46,8 @@ const s = StyleSheet.create({
   foot: { position: 'absolute', bottom: 30, left: 34, right: 34, borderTopWidth: 0.75, borderTopColor: LINE, paddingTop: 8, fontSize: 7, color: MUTE, lineHeight: 1.4 },
 });
 
-export default function FeeStatementPdf({ client, capital, current, gainPct, ladder, totals, generatedAt, priceAsOf, logo }: FeeStatementProps) {
+export default function FeeStatementPdf({ client, capital, current, gainPct, ladder, totals, generatedAt, priceAsOf, logo , cols }: FeeStatementProps) {
+  const table = layout('fees', new Set(cols ?? defaultCols('fees')));
   return (
     <Document>
       <Page size="A4" style={s.page}>
@@ -72,27 +75,36 @@ export default function FeeStatementPdf({ client, capital, current, gainPct, lad
 
         <Text style={s.sectionTitle}>Fee schedule &amp; milestones (Rs.)</Text>
         <View style={s.thead}>
-          <Text style={[s.th, s.cMile]}>Milestone</Text>
-          <Text style={[s.th, s.cRate]}>Rate</Text>
-          <Text style={[s.th, s.cTarget]}>Target value</Text>
-          <Text style={[s.th, s.cFee]}>Fee</Text>
-          <Text style={[s.th, s.cStat]}>Status</Text>
+          {table.map((c) => (
+            <Text key={c.key} style={[s.th, { width: c.pct, textAlign: c.num ? 'right' : 'left' }]}>{c.label}</Text>
+          ))}
         </View>
-        {ladder.map((r, i) => (
+        {ladder.length === 0 ? (
+          <View style={s.row}><Text style={{ fontSize: 8, color: MUTE }}>No milestones match the selected filter.</Text></View>
+        ) : ladder.map((r, i) => (
           <View key={i} style={[s.row, ...(i % 2 ? [s.rowAlt] : [])]}>
-            <Text style={s.cMile}>+{r.milestonePct}% appreciation</Text>
-            <Text style={s.cRate}>{r.rate}%</Text>
-            <Text style={s.cTarget}>{num(r.targetValue)}</Text>
-            <Text style={s.cFee}>{num(r.fee)}</Text>
-            <Text style={[s.cStat, { color: r.status === 'Billed' ? GAIN : r.status === 'Due' ? GOLD : MUTE }]}>
-              {r.status === 'Billed' && r.date ? `Billed ${r.date}` : r.status}
-            </Text>
+            {table.map((c) => (
+              <Text key={c.key}
+                    style={{ width: c.pct, textAlign: c.num ? 'right' : 'left',
+                             ...(c.key === 'status' ? { color: r.status === 'Billed' ? GAIN : r.status === 'Due' ? GOLD : MUTE } : {}) }}>
+                {c.key === 'milestone' ? `+${r.milestonePct}% appreciation`
+                  : c.key === 'rate' ? `${r.rate}%`
+                  : c.key === 'target' ? num(r.targetValue)
+                  : c.key === 'fee' ? num(r.fee)
+                  : c.key === 'status' ? (r.status === 'Billed' && r.date ? `Billed ${r.date}` : r.status)
+                  : ' '}
+              </Text>
+            ))}
           </View>
         ))}
         <View style={s.totalRow}>
-          <Text style={[{ width: '58%', fontFamily: 'Helvetica-Bold' }]}>Total collected to date</Text>
-          <Text style={[s.cFee, { fontFamily: 'Helvetica-Bold', width: '24%' }]}>{num(totals.collected)}</Text>
-          <Text style={[s.cStat]}> </Text>
+          {table.map((c) => (
+            <Text key={c.key}
+                  style={{ width: c.pct, textAlign: c.num ? 'right' : 'left',
+                           ...(c.key === 'milestone' || c.key === 'fee' ? { fontFamily: 'Helvetica-Bold' } : {}) }}>
+              {c.key === 'milestone' ? 'Total collected to date' : c.key === 'fee' ? num(totals.collected) : ' '}
+            </Text>
+          ))}
         </View>
 
         <Text style={s.foot}>

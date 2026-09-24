@@ -9,6 +9,7 @@ const NAV = [
   { href: '/portfolios', label: 'Portfolios' },
   { href: '/capital-flows', label: 'Capital Flows' },
   { href: '/fees', label: 'Fee Engine' },
+  { href: '/reports', label: 'Reports' },
   { href: '/copilot', label: 'AI Copilot' },
 ];
 const SOON: string[] = [];
@@ -18,10 +19,7 @@ export default function Sidebar({ name }: { name: string }) {
   return (
     <aside className="rail">
       <div className="brand-mark">
-        <span className="brand-tile">
-          <img src="/ashesha-as.png" alt="Ashesha Capital" />
-        </span>
-        <div className="brand-name">Wealth&nbsp;OS</div>
+        <img src="/ashesha-wordmark.png" alt="Ashesha Capital Advisory LLP" />
       </div>
 
       <div className="nav-label">Cockpit</div>
@@ -42,8 +40,8 @@ export default function Sidebar({ name }: { name: string }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div className="avatar">{name.slice(0, 2).toUpperCase()}</div>
           <div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: '#EAF4F1' }}>{name}</div>
-            <div style={{ fontSize: 11, color: '#7FB3AB' }}>Advisor</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: '#E7EFFA' }}>{name}</div>
+            <div style={{ fontSize: 11, color: '#89A3C4' }}>Advisor</div>
           </div>
         </div>
       </div>

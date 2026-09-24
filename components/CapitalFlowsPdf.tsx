@@ -1,5 +1,6 @@
 import { Document, Page, View, Text, Image, StyleSheet } from '@react-pdf/renderer';
 import type { FlowReport } from '@/lib/capital-flows';
+import { layout } from '@/lib/report-columns';
 
 const num = (n: number) => Math.abs(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const gl = (n: number) => (n < 0 ? `(${num(n)})` : num(n));
@@ -45,10 +46,32 @@ export type FlowsPdfProps = {
   generatedAt: string;
   priceAsOf: string | null;
   logo: string | null;
+  cols: string[];          // selected column keys, in canonical order
 };
 
-export default function CapitalFlowsPdf({ client, report: r, generatedAt, priceAsOf, logo }: FlowsPdfProps) {
+export default function CapitalFlowsPdf({ client, report: r, generatedAt, priceAsOf, logo, cols }: FlowsPdfProps) {
   const glColor = (n: number) => (Math.abs(n) < 0.005 ? INK : n < 0 ? LOSS : GAIN);
+  const table = layout('flows', new Set(cols));
+  const shownIn = r.events.reduce((a, e) => a + (e.inAmt ?? 0), 0);
+  const shownOut = r.events.reduce((a, e) => a + (e.outAmt ?? 0), 0);
+
+  const cellOf = (key: string, e: (typeof r.events)[number]) => {
+    switch (key) {
+      case 'date': return <Text>{dt(e.date)}</Text>;
+      case 'kind': return <Text style={{ color: e.kind === 'Inflow' ? GAIN : LOSS }}>{e.kind}</Text>;
+      case 'label': return <Text>{e.label}</Text>;
+      case 'in': return <Text>{e.inAmt != null ? num(e.inAmt) : '-'}</Text>;
+      case 'out': return <Text>{e.outAmt != null ? num(e.outAmt) : '-'}</Text>;
+      default: return <Text> </Text>;
+    }
+  };
+
+  const totalOf = (key: string) => {
+    if (key === 'date') return <Text style={s.bold}>Total</Text>;
+    if (key === 'in') return <Text style={s.bold}>{num(shownIn)}</Text>;
+    if (key === 'out') return <Text style={s.bold}>{num(shownOut)}</Text>;
+    return <Text> </Text>;
+  };
   return (
     <Document>
       <Page size="A4" style={s.page}>
@@ -89,29 +112,24 @@ export default function CapitalFlowsPdf({ client, report: r, generatedAt, priceA
 
         <Text style={s.sectionTitle}>Capital movements in the period</Text>
         <View style={s.thead} fixed>
-          <Text style={[s.th, s.cDate]}>Date</Text>
-          <Text style={[s.th, s.cKind]}>Type</Text>
-          <Text style={[s.th, s.cLabel]}>Particulars</Text>
-          <Text style={[s.th, s.cIn]}>Inflow (Rs)</Text>
-          <Text style={[s.th, s.cOut]}>Outflow (Rs)</Text>
+          {table.map((c) => (
+            <Text key={c.key} style={[s.th, { width: c.pct, textAlign: c.num ? 'right' : 'left' }]}>{c.label}</Text>
+          ))}
         </View>
         {r.events.length === 0 ? (
           <View style={s.row}><Text style={{ fontSize: 8, color: MUTE }}>No capital movements in this period.</Text></View>
         ) : r.events.map((e, i) => (
           <View style={[s.row, ...(i % 2 ? [s.rowAlt] : [])]} key={i} wrap={false}>
-            <Text style={s.cDate}>{dt(e.date)}</Text>
-            <Text style={[s.cKind, { color: e.kind === 'Inflow' ? GAIN : LOSS }]}>{e.kind}</Text>
-            <Text style={s.cLabel}>{e.label}</Text>
-            <Text style={s.cIn}>{e.inAmt != null ? num(e.inAmt) : '-'}</Text>
-            <Text style={s.cOut}>{e.outAmt != null ? num(e.outAmt) : '-'}</Text>
+            {table.map((c) => (
+              <View key={c.key} style={{ width: c.pct, textAlign: c.num ? 'right' : 'left' }}>{cellOf(c.key, e)}</View>
+            ))}
           </View>
         ))}
         {r.events.length > 0 && (
           <View style={s.totalRow}>
-            <Text style={[s.bold, s.cDate]}>Total</Text>
-            <Text style={s.cKind}> </Text><Text style={s.cLabel}> </Text>
-            <Text style={[s.bold, s.cIn]}>{num(r.inflows)}</Text>
-            <Text style={[s.bold, s.cOut]}>{num(r.outflows)}</Text>
+            {table.map((c) => (
+              <View key={c.key} style={{ width: c.pct, textAlign: c.num ? 'right' : 'left' }}>{totalOf(c.key)}</View>
+            ))}
           </View>
         )}
 

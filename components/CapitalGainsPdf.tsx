@@ -1,4 +1,5 @@
 import { Document, Page, View, Text, Image, StyleSheet } from '@react-pdf/renderer';
+import { layout } from '@/lib/report-columns';
 
 const num = (n: number) => Math.abs(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const gl = (n: number) => (n < 0 ? `(${num(n)})` : num(n));
@@ -10,7 +11,24 @@ export type CGTotals = { stGain: number; ltGain: number; stProceeds: number; ltP
 export type CGProps = {
   client: { name: string; phone?: string | null; email?: string | null };
   fy: string; rows: CGRow[]; totals: CGTotals; generatedAt: string; logo: string | null;
+  cols: string[];          // selected column keys, in canonical order
 };
+
+type Col = ReturnType<typeof layout>[number];
+
+function cgCell(key: string, r: CGRow) {
+  switch (key) {
+    case 'security': return r.symbol;
+    case 'bought': return r.buyDate;
+    case 'sold': return r.sellDate;
+    case 'days': return String(r.holdingDays);
+    case 'qty': return r.qty.toLocaleString('en-IN');
+    case 'buyval': return num(r.cost);
+    case 'sellval': return num(r.proceeds);
+    case 'gain': return gl(r.gain);
+    default: return ' ';
+  }
+}
 
 const s = StyleSheet.create({
   page: { paddingTop: 34, paddingBottom: 56, paddingHorizontal: 34, fontSize: 8.5, color: INK, fontFamily: 'Helvetica' },
@@ -37,32 +55,26 @@ const s = StyleSheet.create({
   foot: { position: 'absolute', bottom: 30, left: 34, right: 34, borderTopWidth: 0.75, borderTopColor: LINE, paddingTop: 8, fontSize: 6.5, color: MUTE, lineHeight: 1.4 },
 });
 
-function Section({ title, rows, gain }: { title: string; rows: CGRow[]; gain: number }) {
+function Section({ title, rows, gain, table }: { title: string; rows: CGRow[]; gain: number; table: Col[] }) {
   return (
     <>
       <Text style={s.sectionTitle}>{title}</Text>
       <View style={s.thead}>
-        <Text style={[s.th, s.cSym]}>Security</Text>
-        <Text style={[s.th, s.cDt]}>Bought</Text>
-        <Text style={[s.th, s.cDt]}>Sold</Text>
-        <Text style={[s.th, s.cNum]}>Days</Text>
-        <Text style={[s.th, s.cNum]}>Qty</Text>
-        <Text style={[s.th, s.cVal]}>Buy Value</Text>
-        <Text style={[s.th, s.cVal]}>Sell Value</Text>
-        <Text style={[s.th, s.cGain]}>Gain / (Loss)</Text>
+        {table.map((c) => (
+          <Text key={c.key} style={[s.th, { width: c.pct, textAlign: c.num ? 'right' : 'left' }]}>{c.label}</Text>
+        ))}
       </View>
       {rows.length === 0 ? (
         <View style={s.row}><Text style={{ fontSize: 8, color: MUTE }}>None in this period.</Text></View>
       ) : rows.map((r, i) => (
         <View style={[s.row, ...(i % 2 ? [s.rowAlt] : [])]} key={i} wrap={false}>
-          <Text style={s.cSym}>{r.symbol}</Text>
-          <Text style={s.cDt}>{r.buyDate}</Text>
-          <Text style={s.cDt}>{r.sellDate}</Text>
-          <Text style={s.cNum}>{r.holdingDays}</Text>
-          <Text style={s.cNum}>{r.qty.toLocaleString('en-IN')}</Text>
-          <Text style={s.cVal}>{num(r.cost)}</Text>
-          <Text style={s.cVal}>{num(r.proceeds)}</Text>
-          <Text style={[s.cGain, { color: r.gain >= 0 ? GAIN : LOSS }]}>{gl(r.gain)}</Text>
+          {table.map((c) => (
+            <Text key={c.key}
+                  style={{ width: c.pct, textAlign: c.num ? 'right' : 'left',
+                           ...(c.key === 'gain' ? { color: r.gain >= 0 ? GAIN : LOSS } : {}) }}>
+              {cgCell(c.key, r)}
+            </Text>
+          ))}
         </View>
       ))}
       <View style={s.subtotal}>
@@ -73,7 +85,8 @@ function Section({ title, rows, gain }: { title: string; rows: CGRow[]; gain: nu
   );
 }
 
-export default function CapitalGainsPdf({ client, fy, rows, totals, generatedAt, logo }: CGProps) {
+export default function CapitalGainsPdf({ client, fy, rows, totals, generatedAt, logo, cols }: CGProps) {
+  const table = layout('gains', new Set(cols));
   const shortRows = rows.filter((r) => !r.longTerm);
   const longRows = rows.filter((r) => r.longTerm);
   return (
@@ -94,8 +107,8 @@ export default function CapitalGainsPdf({ client, fy, rows, totals, generatedAt,
           <View style={s.sumCard}><Text style={s.sumLabel}>Total realised</Text><Text style={s.sumVal}>{gl(totals.stGain + totals.ltGain)}</Text></View>
         </View>
 
-        <Section title="Short-term (holding ≤ 365 days)" rows={shortRows} gain={totals.stGain} />
-        <Section title="Long-term (holding > 365 days)" rows={longRows} gain={totals.ltGain} />
+        {shortRows.length > 0 || rows.length === 0 ? <Section title="Short-term (holding ≤ 365 days)" rows={shortRows} gain={totals.stGain} table={table} /> : null}
+        {longRows.length > 0 || rows.length === 0 ? <Section title="Long-term (holding > 365 days)" rows={longRows} gain={totals.ltGain} table={table} /> : null}
 
         <View style={s.foot}>
           <Text>Realised capital gains from FIFO-matched lots for FY {fy} (1 Apr – 31 Mar). Short-term ≤ 365 days, long-term &gt; 365 days (listed equity). Grandfathering under Sec. 112A is not applied — this book has no holdings acquired on or before 31 Jan 2018. Figures are indicative and do not constitute tax advice.</Text>

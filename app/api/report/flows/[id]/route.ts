@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createClient } from '@/lib/supabase/server';
 import { computeCapitalFlows, fyStartOf, todayIST, type FlowTxnRow } from '@/lib/capital-flows';
+import { REPORT_COLUMNS, parseCols } from '@/lib/report-columns';
 import CapitalFlowsPdf from '@/components/CapitalFlowsPdf';
 import {
   newWorkbook, addHeader, addTableHead, styleDataRow, styleTotalRow, addNote,
@@ -42,7 +43,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     .from('transactions')
     .select('side, quantity, price, traded_at, security_id, securities(symbol, last_price, last_price_at)')
     .eq('client_id', id);
-  const report = computeCapitalFlows((txns ?? []) as FlowTxnRow[], from, to, today);
+  const on = parseCols('flows', q.get('cols'));
+  const rowMode = q.get('rows') ?? 'all';
+
+  const full = computeCapitalFlows((txns ?? []) as FlowTxnRow[], from, to, today);
+  // Row selection narrows the movements ledger only — the reconciliation above it
+  // still states the whole period, which is what makes the statement reconcile.
+  const events = rowMode === 'in' ? full.events.filter((e) => e.kind === 'Inflow')
+    : rowMode === 'out' ? full.events.filter((e) => e.kind === 'Outflow')
+    : full.events;
+  const report = { ...full, events };
   const priceAsOf = report.closingAtCost
     ? null
     : fmtIST(latestPriceAt((txns ?? []).map((t) => rel((t as any).securities)?.last_price_at)));
@@ -82,21 +92,33 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
     const sect = ws.addRow(['Capital movements in the period']);
     sect.getCell(1).font = { bold: true, size: 11 };
-    addTableHead(ws, ['Date', 'Type', 'Particulars', 'Inflow (Rs)', 'Outflow (Rs)'], 4);
+    const cols = REPORT_COLUMNS.flows.filter((c) => on.has(c.key));
+    addTableHead(ws, cols.map((c) => c.label), 4);
     if (report.events.length === 0) {
-      const r = ws.addRow(['No capital movements in this period.']);
+      const r = ws.addRow(['No capital movements match the selected filter.']);
       r.getCell(1).font = { size: 9.5, italic: true, color: { argb: XLC.mute } };
     }
+    const valueOf = (key: string, e: (typeof report.events)[number]) =>
+      key === 'date' ? dtL(e.date) : key === 'kind' ? e.kind : key === 'label' ? e.label
+        : key === 'in' ? (e.inAmt ?? '-') : key === 'out' ? (e.outAmt ?? '-') : '';
     report.events.forEach((e, i) => {
-      const row = ws.addRow([dtL(e.date), e.kind, e.label, e.inAmt ?? '-', e.outAmt ?? '-']);
+      const row = ws.addRow(cols.map((c) => valueOf(c.key, e)));
       styleDataRow(row, i);
-      row.getCell(2).font = { size: 10, color: { argb: e.kind === 'Inflow' ? XLC.gain : XLC.loss } };
-      for (const c of [4, 5]) { row.getCell(c).numFmt = FMT_MONEY; row.getCell(c).alignment = { horizontal: 'right' }; }
+      cols.forEach((c, ci) => {
+        const cell = row.getCell(ci + 1);
+        if (c.key === 'kind') cell.font = { size: 10, color: { argb: e.kind === 'Inflow' ? XLC.gain : XLC.loss } };
+        if (c.num) { cell.numFmt = FMT_MONEY; cell.alignment = { horizontal: 'right' }; }
+      });
     });
     if (report.events.length > 0) {
-      const tr = ws.addRow(['Total', '', '', report.inflows, report.outflows]);
+      const shownIn = report.events.reduce((a, e) => a + (e.inAmt ?? 0), 0);
+      const shownOut = report.events.reduce((a, e) => a + (e.outAmt ?? 0), 0);
+      const tr = ws.addRow(cols.map((c) =>
+        c.key === 'date' ? 'Total' : c.key === 'in' ? shownIn : c.key === 'out' ? shownOut : ''));
       styleTotalRow(tr);
-      for (const c of [4, 5]) { tr.getCell(c).numFmt = FMT_MONEY; tr.getCell(c).alignment = { horizontal: 'right' }; }
+      cols.forEach((c, ci) => {
+        if (c.num) { tr.getCell(ci + 1).numFmt = FMT_MONEY; tr.getCell(ci + 1).alignment = { horizontal: 'right' }; }
+      });
     }
 
     ws.addRow([]);
@@ -109,7 +131,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const logo = await getLogo();
   const buffer = await renderToBuffer(
-    createElement(CapitalFlowsPdf, { client, report, generatedAt, priceAsOf, logo }) as any,
+    createElement(CapitalFlowsPdf, { client, report, generatedAt, priceAsOf, logo, cols: [...on] }) as any,
   );
   return new Response(new Uint8Array(buffer), {
     headers: { 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${fileBase}.pdf"` },

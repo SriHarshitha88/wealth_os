@@ -4,9 +4,12 @@ import { Fraunces, Hanken_Grotesk } from 'next/font/google';
 
 // Display serif (headings, hero figures) + a clean grotesque for the UI/data.
 // Self-hosted at build by next/font — no runtime CDN, works offline & CSP-safe.
+// Only the weights the stylesheet actually asks for: the serif is used at 400
+// and 600 and nowhere else, so shipping 500/700 was four unused font files.
 const display = Fraunces({
   subsets: ['latin'],
-  weight: ['400', '500', '600', '700'],
+  weight: ['400', '600'],
+  style: ['normal', 'italic'],   // italic is used for the sign-in tagline
   variable: '--font-display',
   display: 'swap',
 });

@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/server';
 import { computeLots } from '@/lib/portfolio-calc';
 import { xirr, positionCashflows } from '@/lib/xirr';
 import ClientReportPdf, { type ReportRow } from '@/components/ClientReportPdf';
+import { REPORT_COLUMNS, parseCols } from '@/lib/report-columns';
 import {
   newWorkbook, addHeader, addTableHead, styleDataRow, styleTotalRow, addNote,
   gainFont, xlsxResponse, fmtIST, latestPriceAt, FMT_MONEY, FMT_QTY, FMT_PCT, XLC,
@@ -32,7 +33,10 @@ function rel(x: any) {
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const format = (req.nextUrl.searchParams.get('format') ?? 'pdf').toLowerCase();
+  const q = req.nextUrl.searchParams;
+  const format = (q.get('format') ?? 'pdf').toLowerCase();
+  const on = parseCols('client', q.get('cols'));
+  const rowMode = q.get('rows') ?? 'all';
   const supabase = await createClient();
 
   // RLS ensures the signed-in advisor can only fetch their own client.
@@ -68,14 +72,22 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     };
   });
 
-  const open = positions.filter((r) => r.qty > 1e-9).sort((a, b) => (b.currentValue ?? 0) - (a.currentValue ?? 0));
-  const closed = positions.filter((r) => r.qty <= 1e-9 && Math.abs(r.realised) > 0.005);
+  let open = positions.filter((r) => r.qty > 1e-9).sort((a, b) => (b.currentValue ?? 0) - (a.currentValue ?? 0));
+  let closed = positions.filter((r) => r.qty <= 1e-9 && Math.abs(r.realised) > 0.005);
+
+  // Row selection from the Reports console.
+  if (rowMode === 'open') closed = [];
+  else if (rowMode === 'sold') open = [];
+  else if (rowMode === 'gainers') { open = open.filter((r) => (r.pl ?? 0) > 0); closed = []; }
+  else if (rowMode === 'losers') { open = open.filter((r) => (r.pl ?? 0) < 0); closed = []; }
+
   const rows: ReportRow[] = [...open, ...closed];
 
+  // Totals follow the row selection, so the total line always matches what is printed.
   const invested = open.reduce((a, r) => a + r.investedValue, 0);
   const current = open.reduce((a, r) => a + (r.currentValue ?? r.investedValue), 0);
   const pl = current - invested;
-  const realised = positions.reduce((a, r) => a + r.realised, 0);
+  const realised = rows.reduce((a, r) => a + r.realised, 0);
   const totals = { invested, current, pl, plPct: invested ? (pl / invested) * 100 : 0, realised };
 
   // Prices are the last fetched close — on a weekend that is Friday's price;
@@ -86,12 +98,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const safe = client.name.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '') || 'client';
 
   if (format === 'xlsx') {
-    return buildXlsx({ client, rows: { open, closed }, totals, generatedAt, priceAsOf, safe });
+    return buildXlsx({ client, rows: { open, closed }, totals, generatedAt, priceAsOf, safe, on });
   }
 
   const logo = await getLogo();
   const buffer = await renderToBuffer(
-    createElement(ClientReportPdf, { client, rows, totals, generatedAt, priceAsOf, logo }) as any,
+    createElement(ClientReportPdf, { client, rows, totals, generatedAt, priceAsOf, logo, cols: [...on] }) as any,
   );
 
   return new Response(new Uint8Array(buffer), {
@@ -103,19 +115,21 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 }
 
 const dt = (d: string | null) => (d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit', timeZone: 'Asia/Kolkata' }) : '-');
+const DASH = '-';
 
-async function buildXlsx({ client, rows, totals, generatedAt, priceAsOf, safe }: {
+async function buildXlsx({ client, rows, totals, generatedAt, priceAsOf, safe, on }: {
   client: { name: string; phone: string; email: string | null; tier: string };
   rows: { open: ReportRow[]; closed: ReportRow[] };
   totals: { invested: number; current: number; pl: number; plPct: number; realised: number };
-  generatedAt: string; priceAsOf: string | null; safe: string;
+  generatedAt: string; priceAsOf: string | null; safe: string; on: Set<string>;
 }) {
+  // Excel shows every selected column, including the ones the PDF folds into
+  // another cell (symbol, price date, purchase price).
+  const cols = REPORT_COLUMNS.client.filter((c) => on.has(c.key));
+
   const wb = newWorkbook();
   const ws = wb.addWorksheet('Portfolio', { views: [{ showGridLines: false }] });
-  ws.columns = [
-    { width: 32 }, { width: 12 }, { width: 10 }, { width: 12 }, { width: 12 },
-    { width: 13 }, { width: 20 }, { width: 16 }, { width: 16 }, { width: 16 }, { width: 15 }, { width: 10 }, { width: 10 },
-  ];
+  ws.columns = cols.map((c) => ({ width: c.key === 'security' ? 32 : Math.max(11, c.label.length + 4) }));
 
   addHeader(ws, 'Portfolio Statement', [
     `${client.name}  ·  ${client.tier} client${client.phone ? `  ·  ${client.phone}` : ''}${client.email ? `  ·  ${client.email}` : ''}`,
@@ -137,59 +151,94 @@ async function buildXlsx({ client, rows, totals, generatedAt, priceAsOf, safe }:
   }
   ws.addRow([]);
 
-  const HEADERS = ['Security', 'Symbol', 'Qty', 'Since', 'Avg Cost', 'Market Price', 'Price as of', 'Current Value', 'Value at Cost', 'Unrealised G/(L)', 'Realised G/(L)', 'Gain %', 'XIRR %'];
-  const sect = ws.addRow(['Holdings']);
-  sect.getCell(1).font = { bold: true, size: 11 };
-  addTableHead(ws, HEADERS, 3);
+  // One cell value per selected column. `null` means the column has nothing for
+  // this row (a sold position has no live price), and prints as a dash.
+  const valueOf = (key: string, r: ReportRow, isSold: boolean): string | number | null => {
+    switch (key) {
+      case 'security': return r.name || r.symbol;
+      case 'symbol': return r.symbol;
+      case 'qty': return isSold ? null : r.qty;
+      case 'since': return dt(r.firstBuyDate);
+      case 'avg': return isSold ? null : r.avg;
+      case 'mkt': return isSold ? null : r.cur;
+      case 'mktdate': return isSold ? null : fmtIST(r.curAt);
+      case 'cur': return isSold ? null : r.currentValue;
+      case 'cost': return isSold ? null : r.investedValue;
+      case 'unrl': return isSold ? null : r.pl;
+      case 'real': return Math.abs(r.realised) < 0.005 ? null : r.realised;
+      case 'pct': return isSold ? null : r.ret;
+      case 'xirr': return r.xirr;
+      default: return null;
+    }
+  };
 
-  rows.open.forEach((r, i) => {
-    const row = ws.addRow([
-      r.name || r.symbol, r.symbol, r.qty, dt(r.firstBuyDate), r.avg,
-      r.cur ?? '-', fmtIST(r.curAt) ?? '-', r.currentValue ?? '-', r.investedValue,
-      r.pl ?? '-', Math.abs(r.realised) < 0.005 ? '-' : r.realised, r.ret == null ? '-' : r.ret, r.xirr == null ? '-' : r.xirr,
-    ]);
-    styleDataRow(row, i);
-    row.getCell(3).numFmt = FMT_QTY;
-    for (const c of [5, 6, 8, 9, 10, 11]) row.getCell(c).numFmt = FMT_MONEY;
-    for (const c of [12, 13]) row.getCell(c).numFmt = FMT_PCT;
-    for (const c of [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]) row.getCell(c).alignment = { horizontal: 'right' };
-    row.getCell(10).font = gainFont(r.pl);
-    row.getCell(11).font = gainFont(Math.abs(r.realised) < 0.005 ? null : r.realised);
-    row.getCell(12).font = gainFont(r.pl);
-    row.getCell(13).font = gainFont(r.xirr);
-  });
+  const MONEY = new Set(['avg', 'mkt', 'cur', 'cost', 'unrl', 'real']);
+  const PCT = new Set(['pct', 'xirr']);
 
-  const tot = ws.addRow(['Total Holdings', '', '', '', '', '', '', totals.current, totals.invested, totals.pl, '', totals.plPct, '']);
-  styleTotalRow(tot);
-  for (const c of [8, 9, 10]) { tot.getCell(c).numFmt = FMT_MONEY; tot.getCell(c).alignment = { horizontal: 'right' }; }
-  tot.getCell(10).font = gainFont(totals.pl, true);
-  tot.getCell(12).numFmt = FMT_PCT;
-  tot.getCell(12).alignment = { horizontal: 'right' };
-  tot.getCell(12).font = gainFont(totals.pl, true);
+  function writeSection(title: string, list: ReportRow[], isSold: boolean) {
+    const sect = ws.addRow([title]);
+    sect.getCell(1).font = { bold: true, size: 11 };
+    addTableHead(ws, cols.map((c) => c.label), 2);
 
-  if (rows.closed.length) {
-    ws.addRow([]);
-    const s2 = ws.addRow(['Sold / Realised']);
-    s2.getCell(1).font = { bold: true, size: 11 };
-    addTableHead(ws, ['Security', 'Symbol', 'First bought', 'Realised G/(L)', 'XIRR %'], 3);
-    rows.closed.forEach((r, i) => {
-      const row = ws.addRow([r.name || r.symbol, r.symbol, dt(r.firstBuyDate), r.realised, r.xirr == null ? '-' : r.xirr]);
+    list.forEach((r, i) => {
+      const row = ws.addRow(cols.map((c) => valueOf(c.key, r, isSold) ?? DASH));
       styleDataRow(row, i);
-      row.getCell(4).numFmt = FMT_MONEY; row.getCell(5).numFmt = FMT_PCT;
-      for (const c of [3, 4, 5]) row.getCell(c).alignment = { horizontal: 'right' };
-      row.getCell(4).font = gainFont(r.realised);
-      row.getCell(5).font = gainFont(r.xirr);
+      cols.forEach((c, ci) => {
+        const cell = row.getCell(ci + 1);
+        if (c.key === 'qty') cell.numFmt = FMT_QTY;
+        else if (MONEY.has(c.key)) cell.numFmt = FMT_MONEY;
+        else if (PCT.has(c.key)) cell.numFmt = FMT_PCT;
+        if (c.num) cell.alignment = { horizontal: 'right' };
+        if (c.key === 'unrl' || c.key === 'pct') cell.font = gainFont(r.pl);
+        if (c.key === 'real') cell.font = gainFont(Math.abs(r.realised) < 0.005 ? null : r.realised);
+        if (c.key === 'xirr') cell.font = gainFont(r.xirr);
+      });
     });
-    const soldTot = rows.closed.reduce((a, r) => a + r.realised, 0);
-    const tr = ws.addRow(['Total Realised', '', '', soldTot, '']);
-    styleTotalRow(tr);
-    tr.getCell(4).numFmt = FMT_MONEY;
-    tr.getCell(4).alignment = { horizontal: 'right' };
-    tr.getCell(4).font = gainFont(soldTot, true);
   }
 
-  ws.addRow([]);
-  addNote(ws, 'Market Price is the last available stock price (previous trading day\'s close on weekends/holidays); the "Price as of" column shows exactly when each price is from.');
+  if (rows.open.length) {
+    writeSection('Holdings', rows.open, false);
+    const totalOf = (key: string): string | number =>
+      key === 'security' ? 'Total Holdings'
+        : key === 'cur' ? totals.current
+        : key === 'cost' ? totals.invested
+        : key === 'unrl' ? totals.pl
+        : key === 'pct' ? totals.plPct
+        : '';
+    const tot = ws.addRow(cols.map((c) => totalOf(c.key)));
+    styleTotalRow(tot);
+    cols.forEach((c, ci) => {
+      const cell = tot.getCell(ci + 1);
+      if (MONEY.has(c.key)) cell.numFmt = FMT_MONEY;
+      if (PCT.has(c.key)) cell.numFmt = FMT_PCT;
+      if (c.num) cell.alignment = { horizontal: 'right' };
+      if (c.key === 'unrl' || c.key === 'pct') cell.font = gainFont(totals.pl, true);
+    });
+    ws.addRow([]);
+  }
+
+  if (rows.closed.length) {
+    writeSection('Sold / Realised', rows.closed, true);
+    const soldTot = rows.closed.reduce((a, r) => a + r.realised, 0);
+    const tr = ws.addRow(cols.map((c) => (c.key === 'security' ? 'Total Realised' : c.key === 'real' ? soldTot : '')));
+    styleTotalRow(tr);
+    cols.forEach((c, ci) => {
+      const cell = tr.getCell(ci + 1);
+      if (c.key === 'real') { cell.numFmt = FMT_MONEY; cell.font = gainFont(soldTot, true); }
+      if (c.num) cell.alignment = { horizontal: 'right' };
+    });
+    ws.addRow([]);
+  }
+
+  if (!rows.open.length && !rows.closed.length) {
+    const r = ws.addRow(['No positions match the selected filter.']);
+    r.getCell(1).font = { size: 9.5, italic: true, color: { argb: XLC.mute } };
+    ws.addRow([]);
+  }
+
+  if (on.has('mkt')) {
+    addNote(ws, 'Market Price is the last available stock price (previous trading day\'s close on weekends/holidays); the "Price as of" column shows exactly when each price is from.');
+  }
   addNote(ws, 'Current value is basis the last available price and may differ from realisable value. XIRR is the annualised money-weighted return.');
   addNote(ws, 'Value at Cost is the purchase cost of the holding. Figures are indicative and do not constitute investment advice.');
 

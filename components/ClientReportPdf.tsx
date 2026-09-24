@@ -1,4 +1,5 @@
 import { Document, Page, View, Text, Image, StyleSheet } from '@react-pdf/renderer';
+import { layout } from '@/lib/report-columns';
 
 const num = (n: number) => Math.abs(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const gl = (n: number) => (n < 0 ? `(${num(n)})` : num(n));
@@ -26,7 +27,6 @@ const s = StyleSheet.create({
   sectionTitle: { fontSize: 10, fontFamily: 'Helvetica-Bold', marginBottom: 6, marginTop: 6 },
   thead: { flexDirection: 'row', backgroundColor: BRAND, paddingVertical: 6, paddingHorizontal: 4 },
   th: { fontSize: 6.8, color: '#FFFFFF', fontFamily: 'Helvetica-Bold' },
-  thSub: { fontSize: 5.8, fontFamily: 'Helvetica', marginTop: 1 },
   row: { flexDirection: 'row', borderBottomWidth: 0.75, borderBottomColor: LINE, paddingVertical: 5, paddingHorizontal: 4 },
   rowAlt: { backgroundColor: ZEBRA },
   totalRow: { flexDirection: 'row', backgroundColor: BAND, paddingVertical: 7, paddingHorizontal: 4, borderTopWidth: 1, borderTopColor: BRAND },
@@ -36,13 +36,7 @@ const s = StyleSheet.create({
   footer: { position: 'absolute', bottom: 28, left: 28, right: 28 },
   note: { fontSize: 6.5, color: MUTE, marginBottom: 2, lineHeight: 1.3 },
   pageNo: { fontSize: 7, color: MUTE, textAlign: 'right', marginTop: 4 },
-  // columns (sum = 100%)
-  cSec: { width: '16%' }, cQty: { width: '6%', textAlign: 'right' }, cSince: { width: '8%', textAlign: 'right' },
-  cMkt: { width: '11%', textAlign: 'right' },
-  cCur: { width: '12%', textAlign: 'right' }, cCost: { width: '12%', textAlign: 'right' }, cUnrl: { width: '12%', textAlign: 'right' },
-  cReal: { width: '10%', textAlign: 'right' }, cPct: { width: '7%', textAlign: 'right', paddingRight: 4 }, cXirr: { width: '6%', textAlign: 'right' },
-  mktDate: { fontSize: 5.8, color: MUTE, marginTop: 1, textAlign: 'right' },
-  costAvg: { fontSize: 5.8, color: MUTE, marginTop: 1, textAlign: 'right' },
+  subNum: { fontSize: 5.8, color: MUTE, marginTop: 1, textAlign: 'right' },
 });
 
 export type ReportRow = {
@@ -58,31 +52,92 @@ export type ReportData = {
   generatedAt: string;
   priceAsOf?: string | null;   // latest price timestamp across holdings, IST
   logo?: string | null;
+  cols: string[];              // selected column keys, in canonical order
 };
 
 const glColor = (n: number | null) => (n == null ? INK : n < 0 ? LOSS : GAIN);
 
-function Head() {
-  return (
-    <View style={s.thead} fixed>
-      <Text style={[s.th, s.cSec]}>Security</Text>
-      <Text style={[s.th, s.cQty]}>Qty</Text>
-      <Text style={[s.th, s.cSince]}>Since</Text>
-      <Text style={[s.th, s.cMkt]}>Mkt Price*</Text>
-      <Text style={[s.th, s.cCur]}>Current Value*</Text>
-      <View style={s.cCost}><Text style={s.th}>Value at Cost</Text><Text style={[s.th, s.thSub]}>(purchase price)</Text></View>
-      <Text style={[s.th, s.cUnrl]}>Unrealised G/(L)</Text>
-      <Text style={[s.th, s.cReal]}>Realised G/(L)</Text>
-      <Text style={[s.th, s.cPct]}>Gain %</Text>
-      <Text style={[s.th, s.cXirr]}>XIRR</Text>
-    </View>
-  );
-}
+export default function ClientReportPdf({ client, rows, totals, generatedAt, priceAsOf, logo, cols }: ReportData) {
+  const on = new Set(cols);
+  const table = layout('client', on);
+  const showAvg = on.has('avg');
+  const showSym = on.has('symbol');
+  const showMktDate = on.has('mktdate');
 
-export default function ClientReportPdf({ client, rows, totals, generatedAt, priceAsOf, logo }: ReportData) {
   const open = rows.filter((r) => r.qty > 1e-9);
   const sold = rows.filter((r) => r.qty <= 1e-9 && Math.abs(r.realised) > 0.005);
   const soldRealised = sold.reduce((a, r) => a + r.realised, 0);
+
+  // One cell of a holdings row, keyed by column. Returns null where the column
+  // has nothing to say for that row (sold positions have no live price).
+  function cell(key: string, r: ReportRow, isSold: boolean) {
+    if (isSold && key !== 'security' && key !== 'since' && key !== 'real' && key !== 'xirr') return <Text>-</Text>;
+    switch (key) {
+      case 'security':
+        return (
+          <View>
+            <Text style={s.secName}>{r.name || r.symbol}</Text>
+            {showSym ? <Text style={s.secSym}>{r.symbol}</Text> : null}
+          </View>
+        );
+      case 'qty': return <Text>{qtyf(r.qty)}</Text>;
+      case 'since': return <Text>{dt(r.firstBuyDate)}</Text>;
+      case 'mkt':
+        return (
+          <View>
+            <Text>{r.cur != null ? num(r.cur) : '-'}</Text>
+            {r.cur != null && r.curAt && showMktDate ? <Text style={s.subNum}>{dt(r.curAt)}</Text> : null}
+          </View>
+        );
+      case 'cur': return <Text>{r.currentValue != null ? num(r.currentValue) : '-'}</Text>;
+      case 'cost':
+        return (
+          <View>
+            <Text>{num(r.investedValue)}</Text>
+            {showAvg ? <Text style={s.subNum}>@ {num(r.avg)}</Text> : null}
+          </View>
+        );
+      case 'unrl': return <Text style={{ color: glColor(r.pl) }}>{r.pl != null ? gl(r.pl) : '-'}</Text>;
+      case 'real':
+        return (
+          <Text style={{ color: glColor(Math.abs(r.realised) < 0.005 ? null : r.realised) }}>
+            {Math.abs(r.realised) < 0.005 ? '-' : gl(r.realised)}
+          </Text>
+        );
+      case 'pct': return <Text style={{ color: glColor(r.pl) }}>{pctf(r.ret)}</Text>;
+      case 'xirr': return <Text style={{ color: glColor(r.xirr) }}>{pctf(r.xirr)}</Text>;
+      default: return <Text> </Text>;
+    }
+  }
+
+  function totalCell(key: string) {
+    switch (key) {
+      case 'security': return <Text style={s.bold}>Total Holdings</Text>;
+      case 'cur': return <Text style={s.bold}>{num(totals.current)}</Text>;
+      case 'cost': return <Text style={s.bold}>{num(totals.invested)}</Text>;
+      case 'unrl': return <Text style={[s.bold, { color: glColor(totals.pl) }]}>{gl(totals.pl)}</Text>;
+      case 'pct': return <Text style={[s.bold, { color: glColor(totals.pl) }]}>{pctf(totals.plPct)}</Text>;
+      default: return <Text> </Text>;
+    }
+  }
+
+  const Head = () => (
+    <View style={s.thead} fixed>
+      {table.map((c) => (
+        <Text key={c.key} style={[s.th, { width: c.pct, textAlign: c.num ? 'right' : 'left' }]}>{c.label}</Text>
+      ))}
+    </View>
+  );
+
+  const Row = ({ r, i, isSold }: { r: ReportRow; i: number; isSold: boolean }) => (
+    <View style={[s.row, i % 2 === 1 ? s.rowAlt : {}]} wrap={false}>
+      {table.map((c) => (
+        <View key={c.key} style={{ width: c.pct, textAlign: c.num ? 'right' : 'left' }}>
+          {cell(c.key, r, isSold)}
+        </View>
+      ))}
+    </View>
+  );
 
   return (
     <Document>
@@ -107,72 +162,48 @@ export default function ClientReportPdf({ client, rows, totals, generatedAt, pri
           <View style={s.sumCard}><Text style={s.sumLabel}>Realised Gain / (Loss)</Text><Text style={[s.sumVal, { color: glColor(Math.abs(totals.realised) < 0.005 ? null : totals.realised) }]}>{Math.abs(totals.realised) < 0.005 ? '-' : gl(totals.realised)}</Text></View>
         </View>
 
-        {/* ---- Holdings (open) ---- */}
-        <Text style={s.sectionTitle}>Holdings</Text>
-        <Head />
-        {open.map((r, i) => (
-          <View style={[s.row, i % 2 === 1 ? s.rowAlt : {}]} key={i} wrap={false}>
-            <View style={s.cSec}><Text style={s.secName}>{r.name || r.symbol}</Text><Text style={s.secSym}>{r.symbol}</Text></View>
-            <Text style={s.cQty}>{qtyf(r.qty)}</Text>
-            <Text style={s.cSince}>{dt(r.firstBuyDate)}</Text>
-            <View style={s.cMkt}>
-              <Text>{r.cur != null ? num(r.cur) : '-'}</Text>
-              {r.cur != null && r.curAt ? <Text style={s.mktDate}>{dt(r.curAt)}</Text> : null}
+        {open.length > 0 && (
+          <>
+            <Text style={s.sectionTitle}>Holdings</Text>
+            <Head />
+            {open.map((r, i) => <Row key={r.symbol + i} r={r} i={i} isSold={false} />)}
+            <View style={s.totalRow}>
+              {table.map((c) => (
+                <View key={c.key} style={{ width: c.pct, textAlign: c.num ? 'right' : 'left' }}>{totalCell(c.key)}</View>
+              ))}
             </View>
-            <Text style={s.cCur}>{r.currentValue != null ? num(r.currentValue) : '-'}</Text>
-            <View style={s.cCost}>
-              <Text>{num(r.investedValue)}</Text>
-              <Text style={s.costAvg}>@ {num(r.avg)}</Text>
-            </View>
-            <Text style={[s.cUnrl, { color: glColor(r.pl) }]}>{r.pl != null ? gl(r.pl) : '-'}</Text>
-            <Text style={[s.cReal, { color: glColor(Math.abs(r.realised) < 0.005 ? null : r.realised) }]}>{Math.abs(r.realised) < 0.005 ? '-' : gl(r.realised)}</Text>
-            <Text style={[s.cPct, { color: glColor(r.pl) }]}>{pctf(r.ret)}</Text>
-            <Text style={[s.cXirr, { color: glColor(r.xirr) }]}>{pctf(r.xirr)}</Text>
-          </View>
-        ))}
-        <View style={s.totalRow}>
-          <Text style={[s.bold, s.cSec]}>Total Holdings</Text>
-          <Text style={s.cQty}> </Text><Text style={s.cSince}> </Text><Text style={s.cMkt}> </Text>
-          <Text style={[s.bold, s.cCur]}>{num(totals.current)}</Text>
-          <Text style={[s.bold, s.cCost]}>{num(totals.invested)}</Text>
-          <Text style={[s.bold, s.cUnrl, { color: glColor(totals.pl) }]}>{gl(totals.pl)}</Text>
-          <Text style={s.cReal}> </Text>
-          <Text style={[s.bold, s.cPct, { color: glColor(totals.pl) }]}>{pctf(totals.plPct)}</Text>
-          <Text style={s.cXirr}> </Text>
-        </View>
+          </>
+        )}
 
-        {/* ---- Sold (realised) ---- */}
         {sold.length > 0 && (
           <>
             <Text style={s.sectionTitle}>Sold / Realised</Text>
             <Head />
-            {sold.map((r, i) => (
-              <View style={[s.row, i % 2 === 1 ? s.rowAlt : {}]} key={i} wrap={false}>
-                <View style={s.cSec}><Text style={s.secName}>{r.name || r.symbol}</Text><Text style={s.secSym}>{r.symbol}</Text></View>
-                <Text style={s.cQty}>-</Text>
-                <Text style={s.cSince}>{dt(r.firstBuyDate)}</Text>
-                <Text style={s.cMkt}>-</Text>
-                <Text style={s.cCur}>-</Text>
-                <Text style={s.cCost}>-</Text>
-                <Text style={s.cUnrl}>-</Text>
-                <Text style={[s.cReal, { color: glColor(r.realised) }]}>{gl(r.realised)}</Text>
-                <Text style={s.cPct}>-</Text>
-                <Text style={[s.cXirr, { color: glColor(r.xirr) }]}>{pctf(r.xirr)}</Text>
-              </View>
-            ))}
+            {sold.map((r, i) => <Row key={r.symbol + i} r={r} i={i} isSold />)}
             <View style={s.totalRow}>
-              <Text style={[s.bold, s.cSec]}>Total Realised</Text>
-              <Text style={s.cQty}> </Text><Text style={s.cSince}> </Text><Text style={s.cMkt}> </Text><Text style={s.cCur}> </Text><Text style={s.cCost}> </Text><Text style={s.cUnrl}> </Text>
-              <Text style={[s.bold, s.cReal, { color: glColor(soldRealised) }]}>{gl(soldRealised)}</Text>
-              <Text style={s.cPct}> </Text><Text style={s.cXirr}> </Text>
+              {table.map((c) => (
+                <View key={c.key} style={{ width: c.pct, textAlign: c.num ? 'right' : 'left' }}>
+                  {c.key === 'security' ? <Text style={s.bold}>Total Realised</Text>
+                    : c.key === 'real' ? <Text style={[s.bold, { color: glColor(soldRealised) }]}>{gl(soldRealised)}</Text>
+                    : <Text> </Text>}
+                </View>
+              ))}
             </View>
             <Text style={{ fontSize: 6.5, color: MUTE, marginTop: 4 }}>Detailed short-term / long-term capital gains are in the separate Capital Gains Statement.</Text>
           </>
         )}
 
+        {open.length === 0 && sold.length === 0 && (
+          <Text style={{ fontSize: 9, color: MUTE, marginTop: 10 }}>No positions match the selected filter.</Text>
+        )}
+
         <View style={s.footer} fixed>
-          <Text style={s.note}>* Market Price is the last available stock price (previous trading day&apos;s close on weekends/holidays); the date under each price shows when it is from. Current value is basis that price and may differ from realisable value. XIRR is the annualised money-weighted return.</Text>
-          <Text style={s.note}>Value at Cost is the purchase cost of the holding; the figure beneath it is the average purchase price per unit. Figures are indicative and do not constitute investment advice.</Text>
+          {on.has('mkt') && (
+            <Text style={s.note}>Market Price is the last available stock price (previous trading day&apos;s close on weekends/holidays); the date under each price shows when it is from. Current value is basis that price and may differ from realisable value.</Text>
+          )}
+          <Text style={s.note}>
+            Value at Cost is the purchase cost of the holding{showAvg ? '; the figure beneath it is the average purchase price per unit' : ''}. Figures are indicative and do not constitute investment advice.
+          </Text>
           <Text style={s.pageNo} render={({ pageNumber, totalPages }) => `Ashesha Capital Advisory LLP  ·  Page ${pageNumber} of ${totalPages}`} />
         </View>
       </Page>

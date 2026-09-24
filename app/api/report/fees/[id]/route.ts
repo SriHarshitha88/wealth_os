@@ -6,6 +6,7 @@ import path from 'node:path';
 import { createClient } from '@/lib/supabase/server';
 import { computeFee, deriveState, BAND_RATES, BAND_STEP } from '@/lib/fee-schedule';
 import FeeStatementPdf, { type FeeLadderRow } from '@/components/FeeStatementPdf';
+import { REPORT_COLUMNS, parseCols } from '@/lib/report-columns';
 import {
   newWorkbook, addHeader, addTableHead, styleDataRow, styleTotalRow, addNote,
   xlsxResponse, fmtIST, latestPriceAt, FMT_MONEY, XLC,
@@ -31,6 +32,10 @@ const fmt = (d: string | null) =>
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const format = (req.nextUrl.searchParams.get('format') ?? 'pdf').toLowerCase();
+  const on = parseCols('fees', req.nextUrl.searchParams.get('cols'));
+  const rowMode = req.nextUrl.searchParams.get('rows') ?? 'all';
+  const keepRow = (status: string) =>
+    rowMode === 'billed' ? status === 'Billed' : rowMode === 'due' ? status !== 'Billed' : true;
   const supabase = await createClient();
 
   const { data: client } = await supabase.from('clients').select('name, phone, email').eq('id', id).maybeSingle();
@@ -98,23 +103,36 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     }
     ws.addRow([]);
 
-    addTableHead(ws, ['Milestone', 'Rate', 'Target value', 'Fee', 'Status'], 2);
-    ladder.forEach((r, i) => {
-      const row = ws.addRow([
-        `+${r.milestonePct}% appreciation`, r.rate / 100, r.targetValue, r.fee,
-        r.status === 'Billed' && r.date ? `Billed ${r.date}` : r.status,
-      ]);
+    const cols = REPORT_COLUMNS.fees.filter((c) => on.has(c.key));
+    addTableHead(ws, cols.map((c) => c.label), 2);
+    const shown = ladder.filter((r) => keepRow(r.status));
+    if (shown.length === 0) {
+      const r = ws.addRow(['No milestones match the selected filter.']);
+      r.getCell(1).font = { size: 9.5, italic: true, color: { argb: XLC.mute } };
+    }
+    const valueOf = (key: string, r: (typeof shown)[number]) =>
+      key === 'milestone' ? `+${r.milestonePct}% appreciation`
+        : key === 'rate' ? r.rate / 100
+        : key === 'target' ? r.targetValue
+        : key === 'fee' ? r.fee
+        : key === 'status' ? (r.status === 'Billed' && r.date ? `Billed ${r.date}` : r.status)
+        : '';
+    shown.forEach((r, i) => {
+      const row = ws.addRow(cols.map((c) => valueOf(c.key, r)));
       styleDataRow(row, i);
-      row.getCell(2).numFmt = '0.0%';
-      row.getCell(3).numFmt = FMT_MONEY;
-      row.getCell(4).numFmt = FMT_MONEY;
-      for (const c of [2, 3, 4, 5]) row.getCell(c).alignment = { horizontal: 'right' };
-      row.getCell(5).font = { size: 10, color: { argb: r.status === 'Billed' ? XLC.gain : r.status === 'Due' ? XLC.gold : XLC.mute } };
+      cols.forEach((c, ci) => {
+        const cell = row.getCell(ci + 1);
+        if (c.key === 'rate') cell.numFmt = '0.0%';
+        else if (c.key === 'target' || c.key === 'fee') cell.numFmt = FMT_MONEY;
+        if (c.num || c.key === 'status') cell.alignment = { horizontal: 'right' };
+        if (c.key === 'status') cell.font = { size: 10, color: { argb: r.status === 'Billed' ? XLC.gain : r.status === 'Due' ? XLC.gold : XLC.mute } };
+      });
     });
-    const tot = ws.addRow(['Total collected to date', '', '', collected, '']);
+    const tot = ws.addRow(cols.map((c) => (c.key === 'milestone' ? 'Total collected to date' : c.key === 'fee' ? collected : '')));
     styleTotalRow(tot);
-    tot.getCell(4).numFmt = FMT_MONEY;
-    tot.getCell(4).alignment = { horizontal: 'right' };
+    cols.forEach((c, ci) => {
+      if (c.key === 'fee') { tot.getCell(ci + 1).numFmt = FMT_MONEY; tot.getCell(ci + 1).alignment = { horizontal: 'right' }; }
+    });
 
     ws.addRow([]);
     addNote(ws, 'Performance fee is charged once on each 20% band of appreciation over invested capital, at rising slab rates (5% / 10% / 12.5% / 15% / 25%), then 25% flat above +100%.');
@@ -126,8 +144,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const logo = await getLogo();
   const buffer = await renderToBuffer(
     createElement(FeeStatementPdf, {
-      client, capital, current, gainPct: calc.gainPct, ladder,
-      totals: { collected, dueNow: calc.feeDue }, generatedAt, priceAsOf, logo,
+      client, capital, current, gainPct: calc.gainPct, ladder: ladder.filter((r) => keepRow(r.status)),
+      totals: { collected, dueNow: calc.feeDue }, generatedAt, priceAsOf, logo, cols: [...on],
     }) as any,
   );
 
