@@ -1,21 +1,21 @@
 import './globals.css';
 import type { Metadata } from 'next';
-import { Fraunces, Hanken_Grotesk } from 'next/font/google';
+import localFont from 'next/font/local';
 
-// Display serif (headings, hero figures) + a clean grotesque for the UI/data.
-// Self-hosted at build by next/font — no runtime CDN, works offline & CSP-safe.
-// Only the weights the stylesheet actually asks for: the serif is used at 400
-// and 600 and nowhere else, so shipping 500/700 was four unused font files.
-const display = Fraunces({
-  subsets: ['latin'],
-  weight: ['400', '600'],
-  style: ['normal', 'italic'],   // italic is used for the sign-in tagline
+// Self-hosted rather than next/font/google: the Google loader fetches font CSS at
+// BUILD time, so every deploy depended on a live call to fonts.googleapis.com — and
+// a failed fetch there breaks the build with an opaque next/font error. These are the
+// same variable fonts (latin subset), both SIL OFL licensed, so hosting them is fine.
+const display = localFont({
+  src: [
+    { path: './fonts/fraunces-latin.woff2', weight: '100 900', style: 'normal' },
+    { path: './fonts/fraunces-italic-latin.woff2', weight: '100 900', style: 'italic' },
+  ],
   variable: '--font-display',
   display: 'swap',
 });
-const sans = Hanken_Grotesk({
-  subsets: ['latin'],
-  weight: ['400', '500', '600', '700'],
+const sans = localFont({
+  src: [{ path: './fonts/hanken-latin.woff2', weight: '100 900', style: 'normal' }],
   variable: '--font-sans',
   display: 'swap',
 });
