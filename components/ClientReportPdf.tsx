@@ -36,7 +36,7 @@ const s = StyleSheet.create({
   footer: { position: 'absolute', bottom: 28, left: 28, right: 28 },
   note: { fontSize: 6.5, color: MUTE, marginBottom: 2, lineHeight: 1.3 },
   pageNo: { fontSize: 7, color: MUTE, textAlign: 'right', marginTop: 4 },
-  subNum: { fontSize: 5.8, color: MUTE, marginTop: 1, textAlign: 'right' },
+  subNum: { fontSize: 6.8, color: '#44514D', marginTop: 1.5, textAlign: 'right' },
 });
 
 export type ReportRow = {
@@ -124,7 +124,7 @@ export default function ClientReportPdf({ client, rows, totals, generatedAt, pri
   const Head = () => (
     <View style={s.thead} fixed>
       {table.map((c) => (
-        <Text key={c.key} style={[s.th, { width: c.pct, textAlign: c.num ? 'right' : 'left' }]}>{c.label}</Text>
+        <Text key={c.key} style={[s.th, { width: c.pct, textAlign: c.num ? 'right' : 'left', paddingRight: 4 }]}>{c.label}</Text>
       ))}
     </View>
   );
@@ -132,7 +132,7 @@ export default function ClientReportPdf({ client, rows, totals, generatedAt, pri
   const Row = ({ r, i, isSold }: { r: ReportRow; i: number; isSold: boolean }) => (
     <View style={[s.row, i % 2 === 1 ? s.rowAlt : {}]} wrap={false}>
       {table.map((c) => (
-        <View key={c.key} style={{ width: c.pct, textAlign: c.num ? 'right' : 'left' }}>
+        <View key={c.key} style={{ width: c.pct, textAlign: c.num ? 'right' : 'left', paddingRight: 4 }}>
           {cell(c.key, r, isSold)}
         </View>
       ))}
@@ -169,7 +169,7 @@ export default function ClientReportPdf({ client, rows, totals, generatedAt, pri
             {open.map((r, i) => <Row key={r.symbol + i} r={r} i={i} isSold={false} />)}
             <View style={s.totalRow}>
               {table.map((c) => (
-                <View key={c.key} style={{ width: c.pct, textAlign: c.num ? 'right' : 'left' }}>{totalCell(c.key)}</View>
+                <View key={c.key} style={{ width: c.pct, textAlign: c.num ? 'right' : 'left', paddingRight: 4 }}>{totalCell(c.key)}</View>
               ))}
             </View>
           </>
@@ -182,7 +182,7 @@ export default function ClientReportPdf({ client, rows, totals, generatedAt, pri
             {sold.map((r, i) => <Row key={r.symbol + i} r={r} i={i} isSold />)}
             <View style={s.totalRow}>
               {table.map((c) => (
-                <View key={c.key} style={{ width: c.pct, textAlign: c.num ? 'right' : 'left' }}>
+                <View key={c.key} style={{ width: c.pct, textAlign: c.num ? 'right' : 'left', paddingRight: 4 }}>
                   {c.key === 'security' ? <Text style={s.bold}>Total Realised</Text>
                     : c.key === 'real' ? <Text style={[s.bold, { color: glColor(soldRealised) }]}>{gl(soldRealised)}</Text>
                     : <Text> </Text>}

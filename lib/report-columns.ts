@@ -30,9 +30,9 @@ export const REPORT_COLUMNS: Record<ReportKind, ColSpec[]> = {
     { key: 'cost',     label: 'Value at cost',    w: 12, on: true,  num: true },
     { key: 'avg',      label: 'Purchase price',   w: 0,  on: true,  num: true }, // under Value at cost in the PDF
     { key: 'unrl',     label: 'Unrealised G/(L)', w: 12, on: true,  num: true },
-    { key: 'real',     label: 'Realised G/(L)',   w: 10, on: true,  num: true },
-    { key: 'pct',      label: 'Gain %',           w: 7,  on: true,  num: true },
-    { key: 'xirr',     label: 'XIRR %',           w: 6,  on: true,  num: true },
+    { key: 'real',     label: 'Realised G/(L)',   w: 11, on: true,  num: true },
+    { key: 'pct',      label: 'Gain %',           w: 9,  on: true,  num: true },
+    { key: 'xirr',     label: 'XIRR %',           w: 9,  on: true,  num: true },
   ],
   flows: [
     { key: 'date',     label: 'Date',             w: 14, on: true, locked: true },
