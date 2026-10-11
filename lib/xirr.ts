@@ -1,5 +1,7 @@
 // XIRR — money-weighted annualised return over dated cashflows.
-// Outflows (buys) are negative, inflows (sells + current market value) positive.
+// Outflows (buys) are negative; inflows (sale proceeds, dividends and the current
+// market value of what is still held) positive. Because sale proceeds are inflows,
+// booked/realised profit is already reflected in the result.
 // Solved with Newton–Raphson and a bisection fallback. Returns a percentage,
 // or null when it can't be computed (single flow, no sign change, no convergence).
 
@@ -61,10 +63,19 @@ export function positionCashflows(
   for (const t of txns) {
     const q = Number(t.quantity) || 0;
     const p = Number(t.price) || 0;
-    if (q <= 0) continue;
-    if (t.side === 'Buy' || t.side === 'IPO') flows.push({ amount: -(q * p), date: t.traded_at });
-    else if (t.side === 'Sell') flows.push({ amount: q * p, date: t.traded_at });
-    // Bonus (price 0) contributes no cashflow
+    if (t.side === 'Buy' || t.side === 'IPO') {
+      if (q > 0 && p > 0) flows.push({ amount: -(q * p), date: t.traded_at });
+    } else if (t.side === 'Sell') {
+      // Sale proceeds carry the booked profit with them, so realised gains are
+      // part of the return without needing to be added separately.
+      if (q > 0 && p > 0) flows.push({ amount: q * p, date: t.traded_at });
+    } else if (t.side === 'Dividend') {
+      // Cash actually returned to the client, so it belongs in a money-weighted
+      // return. Recorded either as per-share x qty, or as a lump sum in `price`.
+      const amount = q > 0 ? q * p : p;
+      if (amount > 0) flows.push({ amount, date: t.traded_at });
+    }
+    // Bonus / Split change the share count, not cash — no flow.
   }
   if (currentQty > 1e-9 && lastPrice != null) flows.push({ amount: currentQty * lastPrice, date: asOfISO });
   return flows;
